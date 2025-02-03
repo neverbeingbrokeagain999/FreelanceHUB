@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="17" failures="17" errors="0" time="16.431">
+  <testsuite name="Admin Endpoints" errors="0" failures="17" skipped="0" timestamp="2025-02-02T09:50:13" time="16.225" tests="17">
+    <testcase classname="Admin Endpoints › GET /api/admin/dashboard/stats" name="should get dashboard stats" time="0.975">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/dashboard/stats" name="should not allow non-admin access" time="0.488">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/users" name="should list users with pagination" time="0.602">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/users" name="should filter users by role" time="0.641">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/users/:id" name="should get user by id" time="0.542">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/users/:id" name="should return 404 for non-existent user" time="0.487">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › PUT /api/admin/users/:id" name="should update user" time="0.496">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › PUT /api/admin/users/:id" name="should not update to invalid role" time="0.482">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › DELETE /api/admin/users/:id" name="should delete user" time="0.5">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › DELETE /api/admin/users/:id" name="should return 404 for non-existent user" time="0.482">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/transactions" name="should list transactions with pagination" time="0.49">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/transactions" name="should not allow non-admin access" time="0.465">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/disputes" name="should list disputes with pagination" time="0.472">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › POST /api/admin/disputes/:id/resolve" name="should resolve dispute" time="0.492">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/notifications" name="should list notifications with pagination" time="0.475">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › PUT /api/admin/notifications/:id/read" name="should mark notification as read" time="0.487">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+    <testcase classname="Admin Endpoints › GET /api/admin/audit-logs" name="should list audit logs with pagination" time="0.484">
+      <failure>ValidationError: Notification validation failed: recipient: Path `recipient` is required.
+    at model.Object.&lt;anonymous&gt;.Document.invalidate (C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3334:32)
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\document.js:3095:17
+    at C:\Users\yhbde\OneDrive\Desktop\FreelanceJob\FLB61\node_modules\mongoose\lib\schemaType.js:1407:9
+    at processTicksAndRejections (node:internal/process/task_queues:85:11)</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

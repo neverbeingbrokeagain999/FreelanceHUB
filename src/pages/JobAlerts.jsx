@@ -40,7 +40,7 @@ import React, { useState, useEffect } from 'react';
         const fetchJobAlert = async () => {
           try {
             const token = localStorage.getItem('token');
-            const response = await fetch('http://localhost:5000/api/job-alerts', {
+            const response = await fetch('/api/job-alerts', {
               headers: {
                 'Authorization': `Bearer ${token}`,
               },
@@ -69,7 +69,7 @@ import React, { useState, useEffect } from 'react';
         e.preventDefault();
         try {
           const token = localStorage.getItem('token');
-          const response = await fetch('http://localhost:5000/api/job-alerts', {
+          const response = await fetch('/api/job-alerts', {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -105,7 +105,7 @@ import React, { useState, useEffect } from 'react';
       const handleDelete = async () => {
         try {
           const token = localStorage.getItem('token');
-          const response = await fetch('http://localhost:5000/api/job-alerts', {
+          const response = await fetch('/api/job-alerts', {
             method: 'DELETE',
             headers: {
               'Authorization': `Bearer ${token}`,

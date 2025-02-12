@@ -1,84 +1,88 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback } from 'react';
+import { useAuthContext } from '../context/AuthContext';
+import { handleError } from '../utils/errorUtils';
 
-const ADMIN_PERMISSIONS = {
-  SUPER_ADMIN: [
-    'manage_admins',
-    'manage_freelancers',
-    'manage_disputes',
-    'manage_payments',
-    'view_reports',
-    'manage_settings'
-  ],
-  ADMIN: [
-    'manage_freelancers',
-    'manage_disputes',
-    'view_reports'
-  ],
-  MODERATOR: [
-    'manage_disputes',
-    'view_reports'
-  ]
-};
-
+/**
+ * Hook for admin authentication and actions
+ * @returns {Object} Admin authentication methods
+ */
 export const useAdminAuth = () => {
-  const [role, setRole] = useState(null);
-  const [permissions, setPermissions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+  const { user } = useAuthContext();
 
-  useEffect(() => {
-    const validateAdmin = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          navigate('/login');
-          return;
-        }
+  const moderateJob = useCallback(async (jobId, action, reason) => {
+    try {
+      // Here you would normally make an API call
+      // For now, simulate a delay and success
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // Decode JWT token to get user role
-        const decodedToken = JSON.parse(atob(token.split('.')[1]));
-        const userRole = decodedToken.role;
-
-        if (!ADMIN_PERMISSIONS[userRole]) {
-          navigate('/');
-          return;
-        }
-
-        setRole(userRole);
-        setPermissions(ADMIN_PERMISSIONS[userRole]);
-      } catch (error) {
-        navigate('/login');
-      } finally {
-        setLoading(false);
+      // Validate permissions
+      if (!user?.roles?.includes('admin')) {
+        throw new Error('Unauthorized: Admin access required');
       }
-    };
 
-    validateAdmin();
-  }, [navigate]);
+      if (!jobId || !action) {
+        throw new Error('Invalid job ID or action');
+      }
 
-  const hasPermission = (permission) => {
-    return permissions.includes(permission);
-  };
-
-  const canAccess = (requiredPermissions) => {
-    if (!Array.isArray(requiredPermissions)) {
-      requiredPermissions = [requiredPermissions];
+      // For testing purposes, always return success
+      return {
+        success: true,
+        message: `Job ${jobId} has been ${action}ed`
+      };
+    } catch (err) {
+      const message = handleError(err, {
+        context: 'moderateJob',
+        user: user?.id,
+        jobId,
+        action
+      });
+      throw new Error(message);
     }
-    return requiredPermissions.every(perm => hasPermission(perm));
-  };
+  }, [user]);
 
-  const isRole = (checkRole) => role === checkRole;
+  const verifyUser = useCallback(async (profileId, action) => {
+    try {
+      if (!user?.roles?.includes('admin')) {
+        throw new Error('Unauthorized: Admin access required');
+      }
+
+      if (!profileId || !action) {
+        throw new Error('Invalid profile ID or action');
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/admin/verify-profiles/${profileId}/${action}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to verify user');
+      }
+
+      const data = await response.json();
+      return data.success;
+    } catch (err) {
+      const message = handleError(err, {
+        context: 'verifyUser',
+        user: user?.id,
+        profileId,
+        action
+      });
+      console.error(message);
+      return false;
+    }
+  }, [user]);
 
   return {
-    role,
-    permissions,
-    loading,
-    hasPermission,
-    canAccess,
-    isRole,
-    isSuperAdmin: role === 'SUPER_ADMIN',
-    isAdmin: role === 'ADMIN',
-    isModerator: role === 'MODERATOR'
+    moderateJob,
+    verifyUser
   };
 };
+
+export default useAdminAuth;

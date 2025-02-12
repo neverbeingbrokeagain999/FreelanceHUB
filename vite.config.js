@@ -4,55 +4,35 @@ import path from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react({
-    include: "**/*.{jsx,tsx}",
-    babel: {
-      plugins: ['@babel/plugin-transform-react-jsx']
-    }
-  })],
+  plugins: [react()],
   server: {
-    port: 3000,
-    historyApiFallback: true,
+    port: 5173,
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
-      },
-      '/socket.io': {
-        target: 'http://localhost:5000',
-        changeOrigin: true,
+        secure: false,
         ws: true,
-      },
-    },
-  },
-  css: {
-    postcss: path.resolve(__dirname, 'postcss.config.cjs'),
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.log('proxy error', err);
+          });
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            console.log('Sending Request:', req.method, req.url);
+          });
+          proxy.on('proxyRes', (proxyRes, req, _res) => {
+            console.log('Received Response:', proxyRes.statusCode, req.url);
+          });
+        }
+      }
+    }
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
-      '@components': path.resolve(__dirname, './src/components'),
-      '@pages': path.resolve(__dirname, './src/pages'),
-      '@hooks': path.resolve(__dirname, './src/hooks'),
-      '@context': path.resolve(__dirname, './src/context'),
-      '@services': path.resolve(__dirname, './src/services'),
-      '@utils': path.resolve(__dirname, './src/utils'),
-      '@assets': path.resolve(__dirname, './src/assets'),
-    },
+      '@': path.resolve(__dirname, './src')
+    }
   },
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['@headlessui/react', '@heroicons/react', 'flowbite-react'],
-        },
-      },
-    },
-  },
-  optimizeDeps: {
-    include: ['@heroicons/react/24/outline', '@heroicons/react/24/solid'],
-  },
+  define: {
+    'process.env': {}
+  }
 });

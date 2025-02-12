@@ -1,99 +1,128 @@
 import jwt from 'jsonwebtoken';
-import rateLimit from 'express-rate-limit';
 import { errorResponse } from '../utils/errorHandler.js';
-import { User } from '../models/User.js';
-import testConfig from '../config/test.js';
+import User from '../models/User.js';
+import { logger } from '../config/logger.js';
+import { getConfig } from '../config/index.js';
 
+const config = getConfig();
+
+/**
+ * Protect routes - Authentication middleware
+ */
 export const protect = async (req, res, next) => {
   try {
     let token;
 
+    // Log incoming request headers
+    console.log('Incoming request headers:', req.headers);
+    
+    // Check for token in Authorization header
     if (req.headers.authorization?.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
+      token = req.headers.authorization.split(' ')[1].trim().replace(/[\n\r]/g, '');
+      console.log('Token found in Authorization header:', token);
+    }
+    // Check for token in cookie
+    else if (req.cookies.jwt) {
+      token = req.cookies.jwt.trim().replace(/[\n\r]/g, '');
+      console.log('Token found in cookie:', token);
     }
 
+    // Return error if no token
     if (!token) {
-      return errorResponse(res, 401, 'No token, authorization denied');
+      console.log('No token found in request');
+      return errorResponse(res, 401, 'Not authorized to access this route');
     }
 
+    // Validate token format
+    if (!token.match(/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$/)) {
+      console.error('Invalid token format');
+      return errorResponse(res, 401, 'Invalid token format');
+    }
+
+    // Log token parts for debugging
+    const [header, payload, signature] = token.split('.');
+    console.log('Token header:', Buffer.from(header, 'base64').toString());
+    console.log('Token payload:', Buffer.from(payload, 'base64').toString());
+    console.log('Using JWT secret:', config.jwt.secret);
+
+    // Verify token
+    let decoded;
     try {
-      const secret = process.env.JWT_SECRET || 'test-jwt-secret-key-123'; // Fallback for tests
-      const decoded = jwt.verify(token, secret);
-      const user = await User.findById(decoded.id).select('-password');
-
-      if (!user) {
-        return errorResponse(res, 401, 'User not found');
-      }
-
-      // Check token version
-      if (decoded.tokenVersion !== user.tokenVersion) {
-        return errorResponse(res, 401, 'Token is invalid');
-      }
-
-      req.user = {
-        ...user.toObject(),
-        id: user._id // Ensure both id and _id are available
-      };
-      next();
-    } catch (error) {
-      return errorResponse(res, 401, 'Token is invalid');
+      decoded = jwt.verify(token, config.jwt.secret);
+      console.log('Token successfully decoded:', decoded);
+    } catch (verifyError) {
+      console.error('Token verification failed:', verifyError.message);
+      return errorResponse(res, 401, `Token verification failed: ${verifyError.message}`);
     }
+
+    // Get user from database
+    const user = await User.findById(decoded.id).select('-password +roles').lean();
+
+    // Check if user exists and is active
+    if (!user) {
+      return errorResponse(res, 401, 'User no longer exists');
+    }
+    
+    if (!user.isActive) {
+      return errorResponse(res, 401, 'User account is deactivated');
+    }
+
+    // Verify user has valid roles
+    if (!user.roles || !Array.isArray(user.roles)) {
+      console.error('Invalid role configuration for user:', user._id);
+      return errorResponse(res, 401, 'Invalid user role configuration');
+    }
+
+    // Add user to request object
+    req.user = {
+      ...user,
+      roles: [...user.roles]
+    };
+
+    console.log('User authenticated successfully:', {
+      id: user._id,
+      roles: user.roles
+    });
+
+    next();
   } catch (error) {
-    return errorResponse(res, 500, 'Server Error');
+    logger.error('Auth middleware error:', error);
+    return errorResponse(res, 500, 'Server error');
   }
 };
 
+/**
+ * Authorize by roles - Authorization middleware
+ * @param {...String} roles - Roles to check for
+ */
 export const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return errorResponse(
-        res, 
-        403, 
-        `User role ${req.user.role} is not authorized to access this route`
-      );
-    }
-    next();
-  };
-};
-
-export const requireEmailVerification = (req, res, next) => {
-  if (!req.user.emailVerified) {
-    return errorResponse(res, 403, 'Email verification required');
-  }
-  next();
-};
-
-// Higher-order function for chaining multiple middleware
-export const authChain = (...middleware) => {
-  return async (req, res, next) => {
     try {
-      for (let mw of middleware) {
-        await new Promise((resolve, reject) => {
-          mw(req, res, (err) => {
-            if (err) reject(err);
-            resolve();
-          });
-        });
+      if (!req.user) {
+        return errorResponse(res, 401, 'User not authenticated');
       }
+
+      console.log('Authorizing roles:', roles);
+      console.log('User roles:', req.user.roles);
+
+      // Check if user has required role
+      if (!roles.some(role => req.user.roles.includes(role))) {
+        return errorResponse(
+          res,
+          403,
+          `User role ${req.user.roles.join(', ')} is not authorized to access this route`
+        );
+      }
+
       next();
     } catch (error) {
-      next(error);
+      logger.error('Authorization middleware error:', error);
+      return errorResponse(res, 500, 'Server error');
     }
   };
 };
 
-export const checkRateLimit = (maxRequests, windowMs) => {
-  // Skip rate limiting in test environment
-  if (process.env.NODE_ENV === 'test') {
-    return (req, res, next) => next();
-  }
-
-  return rateLimit({
-    windowMs,
-    max: 1500,
-    message: {
-      status: 'error',
-      message: 'Too many requests, please try again later'
-    }
-  });
+export default {
+  protect,
+  authorize
 };

@@ -1,208 +1,179 @@
-import speakeasy from 'speakeasy';
+import { authenticator } from 'otplib';
 import qrcode from 'qrcode';
+import TwoFactorAuth from '../models/TwoFactorAuth.js';
 import User from '../models/User.js';
+import logger from '../config/logger.js';
+import { createError } from '../utils/errorHandler.js';
 
-// Enable 2FA for a user
-export const enable2FA = async (req, res) => {
+export const setup2FA = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Generate secret
-    const secret = speakeasy.generateSecret({
-      name: `FreelanceHub:${req.user.email}`
-    });
+    // Check if 2FA is already set up
+    let twoFactorAuth = await TwoFactorAuth.findOne({ user: userId });
+    if (twoFactorAuth?.enabled) {
+      throw createError(400, '2FA is already enabled');
+    }
+
+    // Create or update 2FA record
+    if (!twoFactorAuth) {
+      twoFactorAuth = new TwoFactorAuth({ user: userId });
+    }
+
+    // Generate new credentials
+    const credentials = await twoFactorAuth.generateCredentials();
+    
+    // Generate TOTP secret for QR code
+    const otpauth = authenticator.keyuri(
+      req.user.email,
+      'Freelance Platform',
+      credentials.secret
+    );
 
     // Generate QR code
-    const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url);
-
-    // Update user with secret
-    await User.findByIdAndUpdate(userId, {
-      'security.twoFactorSecret': secret.base32,
-      'security.twoFactorEnabled': false // Will be enabled after verification
-    });
-
-    // Generate backup codes
-    const user = await User.findById(userId);
-    const backupCodes = user.generateBackupCodes();
-    await user.save();
+    const qrCode = await qrcode.toDataURL(otpauth);
 
     res.json({
-      message: 'Two-factor authentication setup initiated',
-      secret: secret.base32,
-      qrCode: qrCodeUrl,
-      backupCodes
+      message: '2FA setup initiated',
+      qrCode,
+      backupCodes: credentials.backupCodes,
+      tempSecret: credentials.secret
     });
   } catch (error) {
-    console.error('Enable 2FA error:', error);
-    res.status(500).json({
-      message: 'Failed to enable two-factor authentication',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    logger.error('2FA setup error:', error);
+    res.status(error.status || 500).json({
+      error: error.message || 'Error setting up 2FA'
     });
   }
 };
 
-// Verify and activate 2FA
 export const verify2FA = async (req, res) => {
   try {
     const { token } = req.body;
     const userId = req.user.id;
 
-    const user = await User.findById(userId);
-    if (!user.security.twoFactorSecret) {
-      return res.status(400).json({ message: '2FA not initiated' });
+    const twoFactorAuth = await TwoFactorAuth.findOne({ user: userId });
+    if (!twoFactorAuth) {
+      throw createError(404, '2FA not set up');
     }
 
-    const verified = speakeasy.totp.verify({
-      secret: user.security.twoFactorSecret,
-      encoding: 'base32',
-      token
+    // Verify the token
+    const isValid = authenticator.verify({
+      token,
+      secret: twoFactorAuth.secret
     });
 
-    if (!verified) {
-      return res.status(400).json({ message: 'Invalid verification code' });
+    if (!isValid) {
+      throw createError(401, 'Invalid verification code');
     }
 
-    user.security.twoFactorEnabled = true;
-    await user.save();
+    // Enable 2FA if not already enabled
+    if (!twoFactorAuth.enabled) {
+      twoFactorAuth.enabled = true;
+      await twoFactorAuth.save();
+    }
 
     res.json({
-      message: 'Two-factor authentication enabled successfully'
+      message: '2FA verified successfully',
+      enabled: true
     });
   } catch (error) {
-    console.error('Verify 2FA error:', error);
-    res.status(500).json({
-      message: 'Failed to verify two-factor authentication',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    logger.error('2FA verification error:', error);
+    res.status(error.status || 500).json({
+      error: error.message || 'Error verifying 2FA'
     });
   }
 };
 
-// Disable 2FA
 export const disable2FA = async (req, res) => {
   try {
     const { token } = req.body;
     const userId = req.user.id;
 
-    const user = await User.findById(userId);
-    if (!user.security.twoFactorEnabled) {
-      return res.status(400).json({ message: '2FA is not enabled' });
+    const twoFactorAuth = await TwoFactorAuth.findOne({ user: userId });
+    if (!twoFactorAuth?.enabled) {
+      throw createError(400, '2FA is not enabled');
     }
 
-    // Verify token before disabling
-    const verified = speakeasy.totp.verify({
-      secret: user.security.twoFactorSecret,
-      encoding: 'base32',
-      token
-    });
-
-    if (!verified) {
-      return res.status(400).json({ message: 'Invalid verification code' });
-    }
-
-    // Reset 2FA settings
-    user.security.twoFactorEnabled = false;
-    user.security.twoFactorSecret = undefined;
-    user.security.twoFactorBackupCodes = [];
-    await user.save();
-
-    res.json({
-      message: 'Two-factor authentication disabled successfully'
-    });
-  } catch (error) {
-    console.error('Disable 2FA error:', error);
-    res.status(500).json({
-      message: 'Failed to disable two-factor authentication',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
-
-// Validate 2FA token
-export const validate2FA = async (req, res) => {
-  try {
-    const { token, userId } = req.body;
-
-    const user = await User.findById(userId);
-    if (!user.security.twoFactorEnabled) {
-      return res.status(400).json({ message: '2FA is not enabled' });
-    }
-
-    // Check if using backup code
-    const backupCode = user.security.twoFactorBackupCodes.find(bc => bc.code === token);
-    if (backupCode) {
-      if (backupCode.used) {
-        return res.status(400).json({ message: 'Backup code already used' });
-      }
-
-      // Mark backup code as used
-      backupCode.used = true;
-      await user.save();
-
-      return res.json({
-        message: 'Two-factor authentication validated successfully',
-        method: 'backup'
-      });
-    }
-
-    // Verify TOTP token
-    const verified = speakeasy.totp.verify({
-      secret: user.security.twoFactorSecret,
-      encoding: 'base32',
+    // Verify the token one last time
+    const isValid = authenticator.verify({
       token,
-      window: 1 // Allow 30 seconds clock skew
+      secret: twoFactorAuth.secret
     });
 
-    if (!verified) {
-      return res.status(400).json({ message: 'Invalid verification code' });
+    if (!isValid) {
+      throw createError(401, 'Invalid verification code');
     }
 
+    // Disable 2FA
+    await TwoFactorAuth.deleteOne({ user: userId });
+
     res.json({
-      message: 'Two-factor authentication validated successfully',
-      method: 'totp'
+      message: '2FA disabled successfully'
     });
   } catch (error) {
-    console.error('Validate 2FA error:', error);
-    res.status(500).json({
-      message: 'Failed to validate two-factor authentication',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    logger.error('2FA disable error:', error);
+    res.status(error.status || 500).json({
+      error: error.message || 'Error disabling 2FA'
     });
   }
 };
 
-// Generate new backup codes
-export const generateNewBackupCodes = async (req, res) => {
+export const validateBackupCode = async (req, res) => {
+  try {
+    const { code } = req.body;
+    const userId = req.user.id;
+
+    const twoFactorAuth = await TwoFactorAuth.findOne({ user: userId });
+    if (!twoFactorAuth?.enabled) {
+      throw createError(400, '2FA is not enabled');
+    }
+
+    // Verify backup code
+    await twoFactorAuth.verifyBackupCode(code);
+
+    res.json({
+      message: 'Backup code verified successfully'
+    });
+  } catch (error) {
+    logger.error('Backup code validation error:', error);
+    res.status(error.status || 500).json({
+      error: error.message || 'Error validating backup code'
+    });
+  }
+};
+
+export const regenerateBackupCodes = async (req, res) => {
   try {
     const { token } = req.body;
     const userId = req.user.id;
 
-    const user = await User.findById(userId);
-    if (!user.security.twoFactorEnabled) {
-      return res.status(400).json({ message: '2FA is not enabled' });
+    const twoFactorAuth = await TwoFactorAuth.findOne({ user: userId });
+    if (!twoFactorAuth?.enabled) {
+      throw createError(400, '2FA is not enabled');
     }
 
-    // Verify token before generating new codes
-    const verified = speakeasy.totp.verify({
-      secret: user.security.twoFactorSecret,
-      encoding: 'base32',
-      token
+    // Verify the token first
+    const isValid = authenticator.verify({
+      token,
+      secret: twoFactorAuth.secret
     });
 
-    if (!verified) {
-      return res.status(400).json({ message: 'Invalid verification code' });
+    if (!isValid) {
+      throw createError(401, 'Invalid verification code');
     }
 
-    const backupCodes = user.generateBackupCodes();
-    await user.save();
+    // Generate new backup codes
+    const credentials = await twoFactorAuth.generateCredentials();
 
     res.json({
-      message: 'New backup codes generated successfully',
-      backupCodes
+      message: 'Backup codes regenerated',
+      backupCodes: credentials.backupCodes
     });
   } catch (error) {
-    console.error('Generate backup codes error:', error);
-    res.status(500).json({
-      message: 'Failed to generate new backup codes',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    logger.error('Backup code regeneration error:', error);
+    res.status(error.status || 500).json({
+      error: error.message || 'Error regenerating backup codes'
     });
   }
 };
@@ -211,16 +182,15 @@ export const generateNewBackupCodes = async (req, res) => {
 export const get2FAStatus = async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = await User.findById(userId).select('security.twoFactorEnabled');
+    const twoFactorAuth = await TwoFactorAuth.findOne({ user: userId });
 
     res.json({
-      enabled: user.security.twoFactorEnabled
+      enabled: Boolean(twoFactorAuth?.enabled)
     });
   } catch (error) {
-    console.error('Get 2FA status error:', error);
+    logger.error('2FA status check error:', error);
     res.status(500).json({
-      message: 'Failed to get 2FA status',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: 'Error checking 2FA status'
     });
   }
 };

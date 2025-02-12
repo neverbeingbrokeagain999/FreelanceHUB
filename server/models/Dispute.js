@@ -1,452 +1,184 @@
 import mongoose from 'mongoose';
-import logger from '../config/logger.js';
 
 const disputeSchema = new mongoose.Schema({
-  // Parties Involved
-  initiator: {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    role: {
-      type: String,
-      enum: ['client', 'freelancer'],
-      required: true
-    }
-  },
-  respondent: {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    role: {
-      type: String,
-      enum: ['client', 'freelancer'],
-      required: true
-    }
-  },
-
-  // Related Entities
   job: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Job'
+    ref: 'Job',
+    required: true
   },
-  contract: {
+  client: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'DirectContract'
+    ref: 'User',
+    required: true
   },
-  milestone: {
+  freelancer: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Job.milestones'
+    ref: 'User',
+    required: true
   },
-  transaction: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Transaction'
-  },
-
-  // Dispute Details
-  type: {
-    type: String,
-    required: true,
-    enum: [
-      'payment',
-      'delivery',
-      'quality',
-      'communication',
-      'scope',
-      'cancellation',
-      'refund',
-      'other'
-    ]
-  },
-  subType: String,
   status: {
     type: String,
-    enum: [
-      'opened',
-      'under_review',
-      'evidence_needed',
-      'mediation',
-      'resolved',
-      'cancelled',
-      'escalated'
-    ],
-    default: 'opened'
+    enum: ['open', 'resolved', 'closed'],
+    default: 'open'
+  },
+  type: {
+    type: String,
+    enum: ['payment', 'delivery', 'communication', 'quality', 'other'],
+    required: true
+  },
+  description: {
+    type: String,
+    required: true
+  },
+  evidences: [{
+    type: {
+      type: String,
+      required: true
+    },
+    url: {
+      type: String,
+      required: true
+    },
+    description: String,
+    uploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    uploadedAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  messages: [{
+    sender: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    content: {
+      type: String,
+      required: true
+    },
+    attachments: [{
+      type: String,
+      url: String,
+      name: String
+    }],
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  resolution: {
+    details: String,
+    outcome: {
+      type: String,
+      enum: ['client_favor', 'freelancer_favor', 'compromise', 'other']
+    },
+    actions: [{
+      type: {
+        type: String,
+        enum: ['refund', 'payment_release', 'warning', 'other'],
+        required: true
+      },
+      amount: Number,
+      description: String,
+      status: {
+        type: String,
+        enum: ['pending', 'completed', 'failed'],
+        default: 'pending'
+      },
+      completedAt: Date
+    }],
+    resolvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    resolvedAt: Date
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  escrowHeld: {
+    type: Boolean,
+    default: true
+  },
+  escalatedToAdmin: {
+    type: Boolean,
+    default: false
   },
   priority: {
     type: String,
     enum: ['low', 'medium', 'high', 'urgent'],
     default: 'medium'
   },
-
-  // Financial Details
-  amount: {
-    disputed: Number,
-    currency: {
-      type: String,
-      default: 'USD'
-    },
-    holdAmount: Boolean
+  deadlineForResponse: {
+    type: Date
   },
-
-  // Dispute Content
-  title: {
-    type: String,
-    required: true,
-    trim: true,
-    maxlength: 200
-  },
-  description: {
-    type: String,
-    required: true,
-    trim: true,
-    maxlength: 5000
-  },
-  desiredOutcome: {
-    type: String,
-    required: true,
-    trim: true,
-    maxlength: 1000
-  },
-
-  // Evidence and Documentation
-  evidence: [{
-    type: {
-      type: String,
-      enum: [
-        'message',
-        'file',
-        'screenshot',
-        'contract',
-        'payment_proof',
-        'delivery_proof',
-        'other'
-      ]
-    },
-    title: String,
-    description: String,
-    url: String,
-    fileType: String,
-    fileSize: Number,
-    uploadedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    uploadedAt: {
-      type: Date,
-      default: Date.now
-    },
-    verificationStatus: {
-      type: String,
-      enum: ['pending', 'verified', 'rejected'],
-      default: 'pending'
-    }
-  }],
-
-  // Communication Thread
-  thread: [{
-    sender: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    role: {
-      type: String,
-      enum: ['client', 'freelancer', 'admin', 'mediator'],
-      required: true
-    },
-    message: {
-      type: String,
-      required: true
-    },
-    attachments: [{
-      title: String,
-      url: String,
-      type: String
-    }],
-    visibility: {
-      type: String,
-      enum: ['all', 'admin_only'],
-      default: 'all'
-    },
-    timestamp: {
-      type: Date,
-      default: Date.now
-    }
-  }],
-
-  // Resolution
-  resolution: {
-    outcome: {
-      type: String,
-      enum: [
-        'resolved_mutually',
-        'in_favor_of_client',
-        'in_favor_of_freelancer',
-        'partial_refund',
-        'full_refund',
-        'cancelled',
-        'other'
-      ]
-    },
-    description: String,
-    amount: Number,
-    currency: String,
-    resolvedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    resolvedAt: Date,
-    acceptedByInitiator: {
-      accepted: Boolean,
-      timestamp: Date
-    },
-    acceptedByRespondent: {
-      accepted: Boolean,
-      timestamp: Date
-    }
-  },
-
-  // Admin Handling
-  admin: {
-    assignedTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    assignedAt: Date,
-    notes: [{
-      content: String,
-      author: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      },
-      timestamp: {
-        type: Date,
-        default: Date.now
-      }
-    }],
-    priority: {
-      type: String,
-      enum: ['low', 'medium', 'high', 'urgent']
-    },
-    tags: [String]
-  },
-
-  // Mediation
-  mediation: {
-    required: {
-      type: Boolean,
-      default: false
-    },
-    mediator: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    startedAt: Date,
-    endedAt: Date,
-    outcome: String,
-    notes: String
-  },
-
-  // Timestamps and Deadlines
-  responseDeadline: Date,
-  escalationDeadline: Date,
-  nextActionDate: Date,
-  resolvedAt: Date,
-
-  // System Metadata
-  systemNotes: [{
-    type: String,
-    timestamp: {
-      type: Date,
-      default: Date.now
-    }
-  }],
-  tags: [String],
-  flags: [{
-    type: String,
-    raisedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    timestamp: {
-      type: Date,
-      default: Date.now
-    }
-  }]
+  lastActivityAt: {
+    type: Date,
+    default: Date.now
+  }
 }, {
   timestamps: true
 });
 
-// Indexes
-disputeSchema.index({ 'initiator.user': 1 });
-disputeSchema.index({ 'respondent.user': 1 });
-disputeSchema.index({ job: 1 });
-disputeSchema.index({ contract: 1 });
+// Indexes for better query performance
 disputeSchema.index({ status: 1 });
-disputeSchema.index({ createdAt: 1 });
-disputeSchema.index({ 'admin.assignedTo': 1 });
+disputeSchema.index({ job: 1 });
+disputeSchema.index({ client: 1 });
+disputeSchema.index({ freelancer: 1 });
+disputeSchema.index({ escalatedToAdmin: 1 });
+disputeSchema.index({ priority: 1 });
+disputeSchema.index({ createdAt: -1 });
+disputeSchema.index({ lastActivityAt: -1 });
 
-// Pre-save middleware
+// Update lastActivityAt on any changes
 disputeSchema.pre('save', function(next) {
-  try {
-    if (this.isNew) {
-      // Set response deadline (5 days from creation)
-      this.responseDeadline = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
-      
-      // Set escalation deadline (14 days from creation)
-      this.escalationDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-    }
-
-    // Update next action date based on status
-    this.updateNextActionDate();
-
-    next();
-  } catch (error) {
-    logger.error('Dispute pre-save error:', error);
-    next(error);
-  }
+  this.lastActivityAt = new Date();
+  next();
 });
 
-// Methods
-disputeSchema.methods = {
-  // Add message to thread
-  addMessage: async function(senderId, role, message, attachments = []) {
-    try {
-      this.thread.push({
-        sender: senderId,
-        role,
-        message,
-        attachments,
-        timestamp: new Date()
-      });
-      await this.save();
-      return this.thread[this.thread.length - 1];
-    } catch (error) {
-      logger.error('Add message error:', error);
-      throw error;
-    }
-  },
+// Method to check if dispute needs attention
+disputeSchema.methods.needsAttention = function() {
+  if (this.status !== 'open') return false;
 
-  // Add evidence
-  addEvidence: async function(evidenceData) {
-    try {
-      this.evidence.push({
-        ...evidenceData,
-        uploadedAt: new Date()
-      });
-      await this.save();
-      return this.evidence[this.evidence.length - 1];
-    } catch (error) {
-      logger.error('Add evidence error:', error);
-      throw error;
-    }
-  },
-
-  // Resolve dispute
-  resolve: async function(resolutionData, adminId) {
-    try {
-      this.resolution = {
-        ...resolutionData,
-        resolvedBy: adminId,
-        resolvedAt: new Date()
-      };
-      this.status = 'resolved';
-      await this.save();
-    } catch (error) {
-      logger.error('Resolve dispute error:', error);
-      throw error;
-    }
-  },
-
-  // Update next action date
-  updateNextActionDate: function() {
-    const now = new Date();
-    switch (this.status) {
-      case 'opened':
-        this.nextActionDate = this.responseDeadline;
-        break;
-      case 'under_review':
-        this.nextActionDate = new Date(now.getTime() + 48 * 60 * 60 * 1000); // 48 hours
-        break;
-      case 'evidence_needed':
-        this.nextActionDate = new Date(now.getTime() + 72 * 60 * 60 * 1000); // 72 hours
-        break;
-      case 'mediation':
-        this.nextActionDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 days
-        break;
-      default:
-        this.nextActionDate = null;
-    }
-  },
-
-  // Escalate dispute
-  escalate: async function(reason) {
-    try {
-      this.status = 'escalated';
-      this.mediation.required = true;
-      this.systemNotes.push({
-        type: 'Dispute escalated',
-        timestamp: new Date()
-      });
-      await this.save();
-    } catch (error) {
-      logger.error('Escalate dispute error:', error);
-      throw error;
-    }
+  const daysSinceLastActivity = (Date.now() - this.lastActivityAt) / (1000 * 60 * 60 * 24);
+  
+  switch (this.priority) {
+    case 'urgent':
+      return daysSinceLastActivity > 1;
+    case 'high':
+      return daysSinceLastActivity > 2;
+    case 'medium':
+      return daysSinceLastActivity > 4;
+    case 'low':
+      return daysSinceLastActivity > 7;
+    default:
+      return false;
   }
 };
 
-// Statics
-disputeSchema.statics = {
-  // Get user disputes
-  getUserDisputes: async function(userId, filters = {}, page = 1, limit = 10) {
-    const query = {
-      $or: [
-        { 'initiator.user': userId },
-        { 'respondent.user': userId }
-      ],
-      ...filters
-    };
+// Method to check if deadline is approaching
+disputeSchema.methods.isDeadlineApproaching = function() {
+  if (!this.deadlineForResponse) return false;
+  
+  const hoursUntilDeadline = (this.deadlineForResponse - Date.now()) / (1000 * 60 * 60);
+  return hoursUntilDeadline > 0 && hoursUntilDeadline < 24;
+};
 
-    return this.find(query)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .populate('initiator.user', 'name email')
-      .populate('respondent.user', 'name email')
-      .populate('job', 'title');
-  },
+// Automatically escalate to admin based on conditions
+disputeSchema.methods.shouldEscalateToAdmin = function() {
+  if (this.escalatedToAdmin) return false;
 
-  // Get disputes requiring attention
-  getDisputesRequiringAttention: async function() {
-    const now = new Date();
-    return this.find({
-      status: { $nin: ['resolved', 'cancelled'] },
-      nextActionDate: { $lte: now }
-    })
-    .sort({ priority: -1, nextActionDate: 1 })
-    .populate('initiator.user', 'name email')
-    .populate('respondent.user', 'name email');
-  },
-
-  // Get dispute statistics
-  getDisputeStats: async function(filters = {}) {
-    return this.aggregate([
-      { $match: filters },
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 },
-          totalAmount: {
-            $sum: { $ifNull: ['$amount.disputed', 0] }
-          }
-        }
-      }
-    ]);
-  }
+  return (
+    this.amount >= 1000 || // High value disputes
+    this.messages.length >= 10 || // Many back-and-forth messages
+    this.evidences.length >= 5 || // Multiple evidence submissions
+    (Date.now() - this.createdAt) / (1000 * 60 * 60 * 24) > 7 // Open for more than 7 days
+  );
 };
 
 const Dispute = mongoose.model('Dispute', disputeSchema);

@@ -1,61 +1,89 @@
 import mongoose from 'mongoose';
-import logger from './logger.js';
+import { logger } from './logger.js';
+import { getConfig } from './index.js';
 
-const connectDB = async () => {
+export const connectDB = async () => {
   try {
-    // In test environment, MongoDB connection is handled by test setup
-    if (process.env.NODE_ENV === 'test') {
-      return;
-    }
-
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 30000, // Increase timeout to 30s for initial connection
-      socketTimeoutMS: 45000, // Close sockets after 45 seconds of inactivity
-      connectTimeoutMS: 30000, // Give up initial connection after 30 seconds
-      ssl: true,
-      retryWrites: true,
-      w: 'majority',
-      family: 4 // Force IPv4
+    const MONGO_URI = process.env.MONGODB_URI;
+    
+    // Log connection attempt (without sensitive data)
+    logger.info('Initializing MongoDB connection...');
+    logger.debug('Database configuration:', {
+      uri: MONGO_URI?.replace(/\/\/([^:]+):([^@]+)@/, '//***:***@'),
+      env: process.env.NODE_ENV
     });
 
-    logger.info(`MongoDB Connected: ${conn.connection.host} (${process.env.NODE_ENV} environment)`);
+    if (!MONGO_URI) {
+      throw new Error('MONGODB_URI environment variable is not defined');
+    }
+
+    const conn = await mongoose.connect(MONGO_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 30000,
+      family: 4,
+      retryWrites: true,
+      w: 'majority',
+      maxPoolSize: 10
+    });
+
+    logger.info(`MongoDB Connected: ${conn.connection.host}`);
 
     // Handle connection events
     mongoose.connection.on('connected', () => {
-      logger.info('MongoDB connection established');
+      logger.info('MongoDB connection established successfully');
     });
 
     mongoose.connection.on('error', (err) => {
-      logger.error('MongoDB connection error:', err);
+      logger.error('MongoDB connection error:', {
+        error: err.message,
+        stack: err.stack,
+        code: err.code
+      });
     });
 
     mongoose.connection.on('disconnected', () => {
       logger.warn('MongoDB connection disconnected');
     });
 
-    // Handle process termination
-    process.on('SIGINT', async () => {
-      try {
-        await mongoose.connection.close();
-        logger.info('MongoDB connection closed through app termination');
-        process.exit(0);
-      } catch (err) {
-        logger.error('Error while closing MongoDB connection:', err);
-        process.exit(1);
-      }
+    mongoose.connection.on('reconnected', () => {
+      logger.info('MongoDB connection reestablished');
     });
 
+    return conn;
   } catch (error) {
-    logger.error('MongoDB connection error:', error);
-    process.exit(1);
+    logger.error('MongoDB connection error:', {
+      error: error.message,
+      stack: error.stack,
+      code: error.code,
+      name: error.name
+    });
+
+    if (error.name === 'MongoServerSelectionError') {
+      logger.error('Could not connect to MongoDB server. Please check if MongoDB is running and accessible.');
+    }
+
+    throw error;
   }
 };
 
-// Schema-level options for all models
-mongoose.set('strictQuery', true); // Strict query mode for improved type safety
-mongoose.set('debug', process.env.NODE_ENV === 'development'); // Log queries in development
+export const closeDB = async () => {
+  try {
+    logger.info('Closing MongoDB connection...');
+    await mongoose.connection.close();
+    logger.info('MongoDB connection closed successfully');
+  } catch (error) {
+    logger.error('Error closing MongoDB connection:', {
+      error: error.message,
+      stack: error.stack
+    });
+    throw error;
+  }
+};
 
-// Configure mongoose to use native ES6 Promises
-mongoose.Promise = global.Promise;
-
-export default connectDB;
+export default {
+  connectDB,
+  closeDB
+};

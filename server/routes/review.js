@@ -1,14 +1,14 @@
 import express from 'express';
+import { body, param, query } from 'express-validator';
 import * as reviewController from '../controllers/reviewController.js';
-import { protect, authorize, authChain, checkRateLimit } from '../middleware/auth.js';
-import { validateRequest } from '../middleware/validation/validator.js';
-import { reviewSchemas } from '../middleware/validation/schemas.js';
-import Joi from 'joi';
+import { protect, authorize } from '../middleware/auth.js';
+import { checkRateLimit } from '../middleware/rateLimit.js';
+import { validate } from '../middleware/validation/validator.js';
 import Review from '../models/Review.js';
-import { AuditLog } from '../models/AuditLog.js';
 import { cacheService } from '../services/cacheService.js';
 import logger from '../config/logger.js';
 import { errorResponse } from '../utils/errorHandler.js';
+import AuditLog from '../models/AuditLog.js';
 
 const router = express.Router();
 
@@ -19,13 +19,15 @@ const router = express.Router();
  */
 router.post(
   '/',
-  authChain(
-    protect,
-    checkRateLimit(20, 60 * 60 * 1000) // 20 reviews per hour
-  ),
-  validateRequest({
-    body: reviewSchemas.create
-  }),
+  protect,
+  checkRateLimit(20, 60 * 60 * 1000), // 20 reviews per hour
+  [
+    body('rating').isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
+    body('content').isString().trim().isLength({ min: 10, max: 1000 }).withMessage('Review content must be between 10 and 1000 characters'),
+    body('targetId').isMongoId().withMessage('Invalid target ID'),
+    body('jobId').optional().isMongoId().withMessage('Invalid job ID'),
+    validate
+  ],
   reviewController.createReview
 );
 
@@ -36,16 +38,14 @@ router.post(
  */
 router.put(
   '/:id',
-  authChain(
-    protect,
-    checkRateLimit(20, 60 * 60 * 1000)
-  ),
-  validateRequest({
-    params: Joi.object({
-      id: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required()
-    }),
-    body: reviewSchemas.update
-  }),
+  protect,
+  checkRateLimit(20, 60 * 60 * 1000),
+  [
+    param('id').isMongoId().withMessage('Invalid review ID'),
+    body('rating').optional().isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
+    body('content').optional().isString().trim().isLength({ min: 10, max: 1000 }).withMessage('Review content must be between 10 and 1000 characters'),
+    validate
+  ],
   reviewController.updateReview
 );
 
@@ -56,15 +56,12 @@ router.put(
  */
 router.delete(
   '/:id',
-  authChain(
-    protect,
-    checkRateLimit(10, 60 * 60 * 1000) // 10 deletions per hour
-  ),
-  validateRequest({
-    params: Joi.object({
-      id: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required()
-    })
-  }),
+  protect,
+  checkRateLimit(10, 60 * 60 * 1000), // 10 deletions per hour
+  [
+    param('id').isMongoId().withMessage('Invalid review ID'),
+    validate
+  ],
   reviewController.deleteReview
 );
 
@@ -75,16 +72,13 @@ router.delete(
  */
 router.get(
   '/user/:userId',
-  validateRequest({
-    params: Joi.object({
-      userId: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required()
-    }),
-    query: Joi.object({
-      page: Joi.number().min(1).default(1),
-      limit: Joi.number().min(1).max(50).default(10),
-      type: Joi.string().valid('client', 'freelancer', 'job')
-    })
-  }),
+  [
+    param('userId').isMongoId().withMessage('Invalid user ID'),
+    query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
+    query('type').optional().isIn(['client', 'freelancer', 'job']).withMessage('Invalid review type'),
+    validate
+  ],
   reviewController.getUserReviews
 );
 
@@ -95,11 +89,10 @@ router.get(
  */
 router.get(
   '/job/:jobId',
-  validateRequest({
-    params: Joi.object({
-      jobId: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required()
-    })
-  }),
+  [
+    param('jobId').isMongoId().withMessage('Invalid job ID'),
+    validate
+  ],
   reviewController.getJobReviews
 );
 
@@ -110,19 +103,14 @@ router.get(
  */
 router.post(
   '/:id/report',
-  authChain(
-    protect,
-    checkRateLimit(5, 60 * 60 * 1000) // 5 reports per hour
-  ),
-  validateRequest({
-    params: Joi.object({
-      id: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required()
-    }),
-    body: Joi.object({
-      reason: Joi.string().valid('inappropriate', 'spam', 'fake', 'harassment', 'other').required(),
-      description: Joi.string().min(10).max(500).required()
-    })
-  }),
+  protect,
+  checkRateLimit(5, 60 * 60 * 1000), // 5 reports per hour
+  [
+    param('id').isMongoId().withMessage('Invalid review ID'),
+    body('reason').isIn(['inappropriate', 'spam', 'fake', 'harassment', 'other']).withMessage('Invalid report reason'),
+    body('description').isString().trim().isLength({ min: 10, max: 500 }).withMessage('Description must be between 10 and 500 characters'),
+    validate
+  ],
   reviewController.reportReview
 );
 
@@ -137,24 +125,20 @@ router.post(
  */
 router.get(
   '/admin/reported',
-  authChain(
-    protect,
-    authorize('admin')
-  ),
-  validateRequest({
-    query: Joi.object({
-      page: Joi.number().min(1).default(1),
-      limit: Joi.number().min(1).max(50).default(20),
-      status: Joi.string().valid('pending', 'resolved', 'rejected')
-    })
-  }),
+  protect,
+  authorize('admin'),
+  [
+    query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
+    query('status').optional().isIn(['pending', 'resolved', 'rejected']).withMessage('Invalid status'),
+    validate
+  ],
   async (req, res) => {
     try {
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 20;
       const status = req.query.status;
 
-      // Build query for reviews with reports
       const query = { 'reports.0': { $exists: true } };
       if (status) {
         query['reports.status'] = status;
@@ -194,19 +178,14 @@ router.get(
  */
 router.put(
   '/admin/:id/moderate',
-  authChain(
-    protect,
-    authorize('admin')
-  ),
-  validateRequest({
-    params: Joi.object({
-      id: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required()
-    }),
-    body: Joi.object({
-      action: Joi.string().valid('remove', 'keep').required(),
-      reason: Joi.string().required()
-    })
-  }),
+  protect,
+  authorize('admin'),
+  [
+    param('id').isMongoId().withMessage('Invalid review ID'),
+    body('action').isIn(['remove', 'keep']).withMessage('Invalid action'),
+    body('reason').isString().trim().notEmpty().withMessage('Reason is required'),
+    validate
+  ],
   async (req, res) => {
     try {
       const { action, reason } = req.body;

@@ -1,5 +1,5 @@
-import { Profile } from '../models/Profile.js';
-import { User } from '../models/User.js';
+import Profile from '../models/Profile.js';
+import User from '../models/User.js';
 import logger from '../config/logger.js';
 
 export const createOrUpdateProfile = async ({ userId, type, data = {} }) => {

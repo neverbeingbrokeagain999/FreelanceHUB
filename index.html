@@ -1,41 +1,101 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="FreelanceHub - The most trusted marketplace for freelancers and businesses. Connect with top talent for your next project." />
-    <meta name="keywords" content="freelance, jobs, hire freelancers, remote work, freelance marketplace" />
+    <meta name="description" content="FreelancePro - A modern freelancing platform with real-time collaboration features" />
     <meta name="theme-color" content="#2563eb" />
     
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Merriweather:wght@400;700&display=swap" rel="stylesheet" />
-    
-    <!-- Inter var font for better performance -->
-    <link rel="preload" href="https://rsms.me/inter/inter.css" as="style" onload="this.onload=null;this.rel='stylesheet'" />
-    <noscript>
-      <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
-    </noscript>
-    
-    <title>FreelanceHub - Connect with Top Freelancers</title>
-
     <!-- Open Graph / Social Media Meta Tags -->
+    <meta property="og:title" content="FreelancePro Platform" />
+    <meta property="og:description" content="Find top freelancers and projects with real-time collaboration features" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://freelancehub.com" />
-    <meta property="og:title" content="FreelanceHub - Connect with Top Freelancers" />
-    <meta property="og:description" content="Find the perfect freelancer for your next project. Trusted by thousands of businesses worldwide." />
-    <meta property="og:image" content="/logo.png" />
+    <meta property="og:url" content="https://freelancepro.com" />
+    <meta property="og:image" content="/og-image.png" />
 
-    <!-- Twitter Meta Tags -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="FreelanceHub - Connect with Top Freelancers" />
-    <meta name="twitter:description" content="Find the perfect freelancer for your next project. Trusted by thousands of businesses worldwide." />
-    <meta name="twitter:image" content="/logo.png" />
+    <!-- Preload fonts -->
+    <link
+      rel="preload"
+      href="/fonts/inter-var.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+
+    <!-- PWA manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Apple specific meta tags -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+
+    <title>FreelancePro Platform</title>
+
+    <!-- Global app styles -->
+    <style>
+      @font-face {
+        font-family: 'Inter var';
+        font-weight: 100 900;
+        font-display: swap;
+        font-style: normal;
+        font-named-instance: 'Regular';
+        src: url('/fonts/inter-var.woff2') format('woff2');
+      }
+
+      body {
+        font-family: 'Inter var', system-ui, -apple-system, BlinkMacSystemFont,
+          'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      /* Loading spinner styles */
+      .initial-loader {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      }
+
+      .initial-loader__spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #2563eb;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Initial loading state -->
+      <div class="initial-loader">
+        <div class="initial-loader__spinner"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
+
+    <!-- Error boundary fallback -->
+    <div id="error-boundary" style="display: none">
+      <div style="padding: 20px; text-align: center;">
+        <h2>Something went wrong</h2>
+        <p>Please try refreshing the page</p>
+        <button onclick="window.location.reload()">Refresh</button>
+      </div>
+    </div>
   </body>
 </html>

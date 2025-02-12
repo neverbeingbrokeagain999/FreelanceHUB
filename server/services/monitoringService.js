@@ -1,379 +1,246 @@
-const os = require('os');
-const logger = require('../config/logger');
-const redis = require('../config/redis');
-const AuditLog = require('../models/AuditLog');
+import { getContextLogger } from '../config/logger.js';
+import { captureException } from '../config/sentry.js';
 
-class MonitoringService {
+const logger = getContextLogger('MonitoringService');
+
+/**
+ * Memory usage metrics
+ * @returns {Object} Memory usage stats
+ */
+const getMemoryUsage = () => {
+  const memory = process.memoryUsage();
+  return {
+    heapTotal: Math.round(memory.heapTotal / 1024 / 1024), // MB
+    heapUsed: Math.round(memory.heapUsed / 1024 / 1024), // MB
+    rss: Math.round(memory.rss / 1024 / 1024), // MB
+    external: Math.round(memory.external / 1024 / 1024), // MB
+    percentUsed: Math.round((memory.heapUsed / memory.heapTotal) * 100)
+  };
+};
+
+/**
+ * CPU usage metrics
+ * @returns {Object} CPU usage stats
+ */
+const getCPUUsage = () => {
+  const cpus = require('os').cpus();
+  const usage = process.cpuUsage();
+  return {
+    numCPUs: cpus.length,
+    model: cpus[0].model,
+    speed: cpus[0].speed,
+    userTime: Math.round(usage.user / 1000000), // convert to seconds
+    systemTime: Math.round(usage.system / 1000000) // convert to seconds
+  };
+};
+
+/**
+ * System metrics
+ * @returns {Object} System stats
+ */
+const getSystemMetrics = () => {
+  const os = require('os');
+  return {
+    platform: os.platform(),
+    arch: os.arch(),
+    totalMemory: Math.round(os.totalmem() / 1024 / 1024), // MB
+    freeMemory: Math.round(os.freemem() / 1024 / 1024), // MB
+    uptime: Math.round(os.uptime()), // seconds
+    loadAvg: os.loadavg()
+  };
+};
+
+/**
+ * Process metrics
+ * @returns {Object} Process stats
+ */
+const getProcessMetrics = () => {
+  return {
+    pid: process.pid,
+    uptime: Math.round(process.uptime()), // seconds
+    nodeVersion: process.version,
+    numConnections: process._getActiveHandles().length,
+    numRequests: process._getActiveRequests().length
+  };
+};
+
+/**
+ * MongoDB metrics
+ * @param {import('mongoose').Connection} db - Mongoose connection
+ * @returns {Object} MongoDB stats
+ */
+const getMongoDBMetrics = async (db) => {
+  try {
+    const stats = await db.db.command({ serverStatus: 1 });
+    return {
+      connections: stats.connections,
+      opcounters: stats.opcounters,
+      mem: stats.mem,
+      wiredTiger: stats.wiredTiger?.cache
+    };
+  } catch (error) {
+    logger.error('Failed to get MongoDB metrics:', error);
+    return null;
+  }
+};
+
+/**
+ * Redis metrics
+ * @param {import('redis').RedisClient} redisClient - Redis client
+ * @returns {Object} Redis stats
+ */
+const getRedisMetrics = async (redisClient) => {
+  try {
+    const info = await redisClient.info();
+    return {
+      connectedClients: info.connected_clients,
+      usedMemory: info.used_memory,
+      totalCommands: info.total_commands_processed,
+      keyspace: info.keyspace
+    };
+  } catch (error) {
+    logger.error('Failed to get Redis metrics:', error);
+    return null;
+  }
+};
+
+/**
+ * Custom metrics registry
+ */
+class MetricsRegistry {
   constructor() {
-    this.metrics = {
-      requests: {
-        total: 0,
-        success: 0,
-        failed: 0,
-        latency: []
-      },
-      memory: {
-        history: []
-      },
-      cpu: {
-        history: []
-      },
-      errors: {
-        count: 0,
-        recent: []
-      },
-      database: {
-        operations: 0,
-        errors: 0,
-        latency: []
-      }
+    this.metrics = new Map();
+  }
+
+  /**
+   * Increment a counter metric
+   * @param {string} name - Metric name
+   * @param {number} [value=1] - Value to increment by
+   * @param {Object} [tags={}] - Metric tags
+   */
+  incrementCounter(name, value = 1, tags = {}) {
+    const key = this.getMetricKey(name, tags);
+    const currentValue = this.metrics.get(key)?.value || 0;
+    this.metrics.set(key, {
+      type: 'counter',
+      value: currentValue + value,
+      tags
+    });
+  }
+
+  /**
+   * Record a gauge metric
+   * @param {string} name - Metric name
+   * @param {number} value - Current value
+   * @param {Object} [tags={}] - Metric tags
+   */
+  setGauge(name, value, tags = {}) {
+    const key = this.getMetricKey(name, tags);
+    this.metrics.set(key, {
+      type: 'gauge',
+      value,
+      tags
+    });
+  }
+
+  /**
+   * Record a histogram value
+   * @param {string} name - Metric name
+   * @param {number} value - Value to record
+   * @param {Object} [tags={}] - Metric tags
+   */
+  recordHistogram(name, value, tags = {}) {
+    const key = this.getMetricKey(name, tags);
+    const current = this.metrics.get(key) || {
+      type: 'histogram',
+      count: 0,
+      sum: 0,
+      min: value,
+      max: value,
+      tags
     };
 
-    this.config = {
-      metricsRetention: 24 * 60 * 60, // 24 hours in seconds
-      errorRetention: 100, // Keep last 100 errors
-      samplingInterval: 60 * 1000, // 1 minute
-      alertThresholds: {
-        memory: 85, // Percentage
-        cpu: 80, // Percentage
-        errorRate: 5, // Percentage
-        responseTime: 1000 // milliseconds
-      }
-    };
-
-    // Start monitoring intervals
-    this.startMonitoring();
+    current.count++;
+    current.sum += value;
+    current.min = Math.min(current.min, value);
+    current.max = Math.max(current.max, value);
+    this.metrics.set(key, current);
   }
 
   /**
-   * Start all monitoring intervals
-   */
-  startMonitoring() {
-    // System metrics collection
-    setInterval(() => {
-      this.collectSystemMetrics();
-    }, this.config.samplingInterval);
-
-    // Metrics cleanup
-    setInterval(() => {
-      this.cleanupMetrics();
-    }, this.config.samplingInterval * 10);
-  }
-
-  /**
-   * Collect system metrics
-   */
-  async collectSystemMetrics() {
-    try {
-      // Memory usage
-      const totalMemory = os.totalmem();
-      const freeMemory = os.freemem();
-      const usedMemory = totalMemory - freeMemory;
-      const memoryUsage = (usedMemory / totalMemory) * 100;
-
-      // CPU usage
-      const cpuUsage = os.loadavg()[0] * 100 / os.cpus().length;
-
-      // Store metrics
-      const timestamp = Date.now();
-      this.metrics.memory.history.push({
-        timestamp,
-        usage: memoryUsage,
-        total: totalMemory,
-        free: freeMemory
-      });
-
-      this.metrics.cpu.history.push({
-        timestamp,
-        usage: cpuUsage
-      });
-
-      // Check thresholds and alert if necessary
-      this.checkThresholds({
-        memory: memoryUsage,
-        cpu: cpuUsage
-      });
-
-      // Log metrics
-      logger.debug('System metrics collected', {
-        memory: memoryUsage.toFixed(2) + '%',
-        cpu: cpuUsage.toFixed(2) + '%'
-      });
-
-      // Store in Redis for real-time monitoring
-      await redis.set('metrics:latest', {
-        memory: memoryUsage,
-        cpu: cpuUsage,
-        timestamp
-      }, 300); // 5 minutes TTL
-
-    } catch (error) {
-      logger.error('Error collecting system metrics:', error);
-    }
-  }
-
-  /**
-   * Track request metrics
-   */
-  trackRequest(req, res, startTime) {
-    const duration = Date.now() - startTime;
-    const success = res.statusCode < 400;
-
-    this.metrics.requests.total++;
-    if (success) {
-      this.metrics.requests.success++;
-    } else {
-      this.metrics.requests.failed++;
-    }
-
-    this.metrics.requests.latency.push({
-      timestamp: Date.now(),
-      duration,
-      path: req.path,
-      method: req.method,
-      statusCode: res.statusCode
-    });
-
-    // Check if response time exceeds threshold
-    if (duration > this.config.alertThresholds.responseTime) {
-      this.alertSlowResponse(req, duration);
-    }
-
-    // Log request metrics
-    logger.debug('Request tracked', {
-      path: req.path,
-      method: req.method,
-      duration,
-      statusCode: res.statusCode
-    });
-  }
-
-  /**
-   * Track database operations
-   */
-  trackDBOperation(operation, collection, duration) {
-    this.metrics.database.operations++;
-    this.metrics.database.latency.push({
-      timestamp: Date.now(),
-      operation,
-      collection,
-      duration
-    });
-
-    logger.debug('Database operation tracked', {
-      operation,
-      collection,
-      duration
-    });
-  }
-
-  /**
-   * Track errors
-   */
-  trackError(error, req = null) {
-    this.metrics.errors.count++;
-    this.metrics.errors.recent.unshift({
-      timestamp: Date.now(),
-      message: error.message,
-      stack: error.stack,
-      path: req?.path,
-      method: req?.method
-    });
-
-    // Keep only recent errors
-    if (this.metrics.errors.recent.length > this.config.errorRetention) {
-      this.metrics.errors.recent.pop();
-    }
-
-    // Log error
-    logger.error('Error tracked:', error);
-
-    // Check error rate threshold
-    this.checkErrorRate();
-  }
-
-  /**
-   * Check monitoring thresholds
-   */
-  async checkThresholds(metrics) {
-    try {
-      const alerts = [];
-
-      // Memory threshold
-      if (metrics.memory > this.config.alertThresholds.memory) {
-        alerts.push({
-          type: 'high-memory-usage',
-          value: metrics.memory,
-          threshold: this.config.alertThresholds.memory
-        });
-      }
-
-      // CPU threshold
-      if (metrics.cpu > this.config.alertThresholds.cpu) {
-        alerts.push({
-          type: 'high-cpu-usage',
-          value: metrics.cpu,
-          threshold: this.config.alertThresholds.cpu
-        });
-      }
-
-      // Log alerts
-      if (alerts.length > 0) {
-        await this.logAlerts(alerts);
-      }
-
-    } catch (error) {
-      logger.error('Error checking thresholds:', error);
-    }
-  }
-
-  /**
-   * Check error rate
-   */
-  async checkErrorRate() {
-    const total = this.metrics.requests.total;
-    if (total === 0) return;
-
-    const errorRate = (this.metrics.requests.failed / total) * 100;
-    if (errorRate > this.config.alertThresholds.errorRate) {
-      await this.logAlerts([{
-        type: 'high-error-rate',
-        value: errorRate,
-        threshold: this.config.alertThresholds.errorRate
-      }]);
-    }
-  }
-
-  /**
-   * Alert for slow responses
-   */
-  async alertSlowResponse(req, duration) {
-    await this.logAlerts([{
-      type: 'slow-response',
-      value: duration,
-      threshold: this.config.alertThresholds.responseTime,
-      path: req.path,
-      method: req.method
-    }]);
-  }
-
-  /**
-   * Log monitoring alerts
-   */
-  async logAlerts(alerts) {
-    try {
-      // Log to AuditLog
-      await AuditLog.logUserAction({
-        event: 'monitoring-alert',
-        severity: 'high',
-        metadata: { alerts }
-      });
-
-      // Log to application logger
-      logger.warn('Monitoring alerts triggered', { alerts });
-
-      // Store in Redis for real-time monitoring
-      await redis.set('alerts:latest', {
-        alerts,
-        timestamp: Date.now()
-      }, 3600); // 1 hour TTL
-
-    } catch (error) {
-      logger.error('Error logging alerts:', error);
-    }
-  }
-
-  /**
-   * Clean up old metrics
-   */
-  cleanupMetrics() {
-    const now = Date.now();
-    const retentionMs = this.config.metricsRetention * 1000;
-
-    // Clean up memory metrics
-    this.metrics.memory.history = this.metrics.memory.history.filter(
-      metric => now - metric.timestamp < retentionMs
-    );
-
-    // Clean up CPU metrics
-    this.metrics.cpu.history = this.metrics.cpu.history.filter(
-      metric => now - metric.timestamp < retentionMs
-    );
-
-    // Clean up request latency metrics
-    this.metrics.requests.latency = this.metrics.requests.latency.filter(
-      metric => now - metric.timestamp < retentionMs
-    );
-
-    // Clean up database latency metrics
-    this.metrics.database.latency = this.metrics.database.latency.filter(
-      metric => now - metric.timestamp < retentionMs
-    );
-
-    logger.debug('Metrics cleanup completed');
-  }
-
-  /**
-   * Get current metrics
+   * Get all metrics
+   * @returns {Array<Object>} All recorded metrics
    */
   getMetrics() {
-    return {
-      ...this.metrics,
-      timestamp: Date.now()
-    };
+    return Array.from(this.metrics.entries()).map(([key, metric]) => ({
+      name: this.getMetricName(key),
+      ...metric
+    }));
   }
 
   /**
-   * Get system health status
+   * Clear all metrics
    */
-  async getHealthStatus() {
-    try {
-      // Check Redis connection
-      const redisHealthy = await redis.ping();
+  clear() {
+    this.metrics.clear();
+  }
 
-      // Check memory usage
-      const memoryUsage = (os.totalmem() - os.freemem()) / os.totalmem() * 100;
+  /**
+   * Get metric key combining name and tags
+   * @private
+   */
+  getMetricKey(name, tags) {
+    const tagString = Object.entries(tags)
+      .sort()
+      .map(([k, v]) => `${k}:${v}`)
+      .join(',');
+    return tagString ? `${name}#${tagString}` : name;
+  }
 
-      // Check error rate
-      const errorRate = this.metrics.requests.total === 0 ? 0 :
-        (this.metrics.requests.failed / this.metrics.requests.total) * 100;
-
-      const status = {
-        healthy: true,
-        services: {
-          redis: {
-            status: redisHealthy ? 'healthy' : 'unhealthy'
-          },
-          memory: {
-            status: memoryUsage < this.config.alertThresholds.memory ? 'healthy' : 'warning',
-            usage: memoryUsage
-          },
-          errors: {
-            status: errorRate < this.config.alertThresholds.errorRate ? 'healthy' : 'warning',
-            rate: errorRate
-          }
-        },
-        timestamp: Date.now()
-      };
-
-      // Overall health is false if any service is unhealthy
-      status.healthy = Object.values(status.services)
-        .every(service => service.status !== 'unhealthy');
-
-      return status;
-
-    } catch (error) {
-      logger.error('Error getting health status:', error);
-      return {
-        healthy: false,
-        error: error.message,
-        timestamp: Date.now()
-      };
-    }
+  /**
+   * Get metric name from key
+   * @private
+   */
+  getMetricName(key) {
+    return key.split('#')[0];
   }
 }
 
-// Create singleton instance
-const monitoringService = new MonitoringService();
+// Create a global metrics registry
+export const metrics = new MetricsRegistry();
 
-module.exports = monitoringService;
+/**
+ * Get all monitoring metrics
+ * @param {Object} params - Parameters
+ * @param {import('mongoose').Connection} params.db - Mongoose connection
+ * @param {import('redis').RedisClient} params.redisClient - Redis client
+ * @returns {Promise<Object>} All metrics
+ */
+export const getAllMetrics = async ({ db, redisClient } = {}) => {
+  try {
+    const [mongoMetrics, redisMetrics] = await Promise.all([
+      db ? getMongoDBMetrics(db) : null,
+      redisClient ? getRedisMetrics(redisClient) : null
+    ]);
+
+    return {
+      timestamp: new Date().toISOString(),
+      memory: getMemoryUsage(),
+      cpu: getCPUUsage(),
+      system: getSystemMetrics(),
+      process: getProcessMetrics(),
+      mongodb: mongoMetrics,
+      redis: redisMetrics,
+      custom: metrics.getMetrics()
+    };
+  } catch (error) {
+    logger.error('Failed to get monitoring metrics:', error);
+    captureException(error, { tags: { service: 'monitoring' } });
+    throw error;
+  }
+};
+
+export default {
+  metrics,
+  getAllMetrics
+};

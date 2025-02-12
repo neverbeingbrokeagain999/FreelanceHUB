@@ -1,305 +1,274 @@
-import Meeting from '../models/Meeting.js';
-import User from '../models/User.js';
-import { v4 as uuidv4 } from 'uuid';
-import { io } from '../index.js';
+const Meeting = require('../models/Meeting');
+const { MEETING_ROLES, WEBRTC_CONFIG } = require('../config/webrtc');
+const { createError } = require('../utils/errorHandler');
+const socketService = require('../services/socketService');
 
-// Create a new meeting
-export const createMeeting = async (req, res) => {
-  try {
-    const {
-      title,
-      startTime,
-      jobId,
-      type = 'instant',
-      settings,
-      metadata,
-      maxParticipants
-    } = req.body;
+const meetingController = {
+  // Create a new meeting
+  async createMeeting(req, res, next) {
+    try {
+      const meetingData = {
+        ...req.body,
+        host: req.user._id,
+        participants: [{
+          user: req.user._id,
+          role: MEETING_ROLES.HOST,
+          deviceInfo: req.body.deviceInfo,
+          connectionInfo: {
+            ip: req.ip,
+            ...req.body.connectionInfo
+          }
+        }]
+      };
 
-    const meeting = new Meeting({
-      title,
-      host: req.user.id,
-      meetingId: uuidv4(),
-      startTime: startTime || new Date(),
-      job: jobId,
-      type,
-      settings: { ...Meeting.schema.obj.settings, ...settings },
-      metadata,
-      maxParticipants: maxParticipants || 10,
-      password: type === 'scheduled' ? Math.random().toString(36).slice(-8).toUpperCase() : undefined
-    });
-
-    await meeting.save();
-
-    // If it's a scheduled meeting, notify relevant participants
-    if (type === 'scheduled' && jobId) {
-      // TODO: Send notifications to job participants
-    }
-
-    res.status(201).json({
-      message: 'Meeting created successfully',
-      meeting: {
-        ...meeting.toJSON(),
-        password: meeting.password // Include password only in response
+      const meeting = await Meeting.create(meetingData);
+      
+      // Notify relevant users if it's a scheduled meeting
+      if (meeting.type !== 'instant') {
+        // TODO: Implement notification logic
       }
-    });
-  } catch (error) {
-    console.error('Create meeting error:', error);
-    res.status(500).json({
-      message: 'Failed to create meeting',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
 
-// Join a meeting
-export const joinMeeting = async (req, res) => {
-  try {
-    const { meetingId, password, deviceInfo } = req.body;
-    const userId = req.user.id;
-
-    const meeting = await Meeting.findOne({ meetingId }).populate('host', 'name');
-    if (!meeting) {
-      return res.status(404).json({ message: 'Meeting not found' });
-    }
-
-    if (meeting.status === 'completed' || meeting.status === 'cancelled') {
-      return res.status(400).json({ message: 'Meeting has ended' });
-    }
-
-    // Check password for scheduled meetings
-    if (meeting.type === 'scheduled' && meeting.password !== password) {
-      return res.status(401).json({ message: 'Invalid meeting password' });
-    }
-
-    // Add participant
-    await meeting.addParticipant(userId, deviceInfo);
-
-    // If this is the first participant, start the meeting
-    if (meeting.status === 'scheduled' && meeting.participants.length === 1) {
-      meeting.status = 'active';
-      await meeting.save();
-    }
-
-    // Create a room for socket.io
-    const room = `meeting_${meetingId}`;
-    io.to(room).emit('participantJoined', {
-      userId,
-      name: req.user.name,
-      role: meeting.host.toString() === userId ? 'host' : 'participant'
-    });
-
-    res.json({
-      message: 'Joined meeting successfully',
-      meeting: {
-        ...meeting.toJSON(),
-        password: undefined // Don't send password in response
-      }
-    });
-  } catch (error) {
-    console.error('Join meeting error:', error);
-    res.status(500).json({
-      message: 'Failed to join meeting',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
-
-// Leave meeting
-export const leaveMeeting = async (req, res) => {
-  try {
-    const { meetingId } = req.params;
-    const userId = req.user.id;
-
-    const meeting = await Meeting.findOne({ meetingId });
-    if (!meeting) {
-      return res.status(404).json({ message: 'Meeting not found' });
-    }
-
-    await meeting.removeParticipant(userId);
-
-    // Notify other participants
-    const room = `meeting_${meetingId}`;
-    io.to(room).emit('participantLeft', {
-      userId,
-      name: req.user.name
-    });
-
-    // If no participants left, end the meeting
-    const activeParticipants = meeting.participants.filter(p => !p.leftAt);
-    if (activeParticipants.length === 0) {
-      await meeting.endMeeting();
-    }
-
-    res.json({ message: 'Left meeting successfully' });
-  } catch (error) {
-    console.error('Leave meeting error:', error);
-    res.status(500).json({
-      message: 'Failed to leave meeting',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
-
-// End meeting (host only)
-export const endMeeting = async (req, res) => {
-  try {
-    const { meetingId } = req.params;
-    const userId = req.user.id;
-
-    const meeting = await Meeting.findOne({ meetingId });
-    if (!meeting) {
-      return res.status(404).json({ message: 'Meeting not found' });
-    }
-
-    if (meeting.host.toString() !== userId) {
-      return res.status(403).json({ message: 'Only host can end meeting' });
-    }
-
-    await meeting.endMeeting();
-
-    // Notify all participants
-    const room = `meeting_${meetingId}`;
-    io.to(room).emit('meetingEnded', {
-      meetingId,
-      endedBy: req.user.name
-    });
-
-    res.json({ message: 'Meeting ended successfully' });
-  } catch (error) {
-    console.error('End meeting error:', error);
-    res.status(500).json({
-      message: 'Failed to end meeting',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
-
-// Start/Stop recording
-export const toggleRecording = async (req, res) => {
-  try {
-    const { meetingId } = req.params;
-    const userId = req.user.id;
-
-    const meeting = await Meeting.findOne({ meetingId });
-    if (!meeting) {
-      return res.status(404).json({ message: 'Meeting not found' });
-    }
-
-    if (meeting.host.toString() !== userId) {
-      return res.status(403).json({ message: 'Only host can manage recording' });
-    }
-
-    const isRecording = meeting.recordings.some(r => !r.endTime);
-    if (isRecording) {
-      // Stop recording
-      const currentRecording = meeting.recordings.find(r => !r.endTime);
-      currentRecording.endTime = new Date();
-      currentRecording.duration = (currentRecording.endTime - currentRecording.startTime) / 1000;
-      currentRecording.status = 'processing';
-    } else {
-      // Start recording
-      meeting.recordings.push({
-        url: `recordings/${meetingId}/${Date.now()}.mp4`, // Placeholder URL
-        startTime: new Date(),
-        format: 'mp4'
+      res.status(201).json({
+        success: true,
+        data: meeting
       });
+    } catch (error) {
+      next(error);
     }
+  },
 
-    await meeting.save();
+  // Get meeting details
+  async getMeeting(req, res, next) {
+    try {
+      const meeting = await Meeting.findById(req.params.id)
+        .populate('host', 'name email')
+        .populate('participants.user', 'name email');
 
-    // Notify participants
-    const room = `meeting_${meetingId}`;
-    io.to(room).emit('recordingStatusChanged', {
-      isRecording: !isRecording
-    });
+      if (!meeting) {
+        throw createError(404, 'Meeting not found');
+      }
 
-    res.json({
-      message: `Recording ${isRecording ? 'stopped' : 'started'} successfully`
-    });
-  } catch (error) {
-    console.error('Toggle recording error:', error);
-    res.status(500).json({
-      message: 'Failed to toggle recording',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
+      // Check if user has access to meeting
+      if (!meeting.participants.some(p => 
+        p.user._id.toString() === req.user._id.toString()
+      ) && meeting.host._id.toString() !== req.user._id.toString()) {
+        throw createError(403, 'Access denied');
+      }
 
-// Get meeting details
-export const getMeeting = async (req, res) => {
-  try {
-    const { meetingId } = req.params;
-    const userId = req.user.id;
-
-    const meeting = await Meeting.findOne({ meetingId })
-      .populate('host', 'name')
-      .populate('participants.user', 'name');
-
-    if (!meeting) {
-      return res.status(404).json({ message: 'Meeting not found' });
+      res.json({
+        success: true,
+        data: meeting
+      });
+    } catch (error) {
+      next(error);
     }
+  },
 
-    // Check if user is participant or host
-    const isParticipant = meeting.participants.some(p => p.user._id.toString() === userId);
-    const isHost = meeting.host._id.toString() === userId;
+  // Update meeting
+  async updateMeeting(req, res, next) {
+    try {
+      const meeting = await Meeting.findById(req.params.id);
+      
+      if (!meeting) {
+        throw createError(404, 'Meeting not found');
+      }
 
-    if (!isParticipant && !isHost) {
-      return res.status(403).json({ message: 'Not authorized to view meeting details' });
+      // Only host can update meeting
+      if (meeting.host.toString() !== req.user._id.toString()) {
+        throw createError(403, 'Only host can update meeting');
+      }
+
+      const updatedMeeting = await Meeting.findByIdAndUpdate(
+        req.params.id,
+        { $set: req.body },
+        { new: true }
+      );
+
+      // Notify participants of changes
+      socketService.emitToRoom(
+        `meeting:${meeting._id}`,
+        'meeting:updated',
+        updatedMeeting
+      );
+
+      res.json({
+        success: true,
+        data: updatedMeeting
+      });
+    } catch (error) {
+      next(error);
     }
+  },
 
-    res.json({
-      ...meeting.toJSON(),
-      password: undefined // Don't send password in response
-    });
-  } catch (error) {
-    console.error('Get meeting error:', error);
-    res.status(500).json({
-      message: 'Failed to fetch meeting details',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
+  // Join meeting
+  async joinMeeting(req, res, next) {
+    try {
+      const meeting = await Meeting.findById(req.params.id);
+      
+      if (!meeting) {
+        throw createError(404, 'Meeting not found');
+      }
 
-// Get user's meetings
-export const getUserMeetings = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { status, type, limit = 10, page = 1 } = req.query;
+      if (meeting.status !== 'live' && meeting.status !== 'scheduled') {
+        throw createError(400, 'Meeting is not available for joining');
+      }
 
-    const query = {
-      $or: [
-        { host: userId },
-        { 'participants.user': userId }
-      ]
-    };
+      if (meeting.participants.length >= meeting.settings.maxParticipants) {
+        throw createError(400, 'Meeting is at maximum capacity');
+      }
 
-    if (status) query.status = status;
-    if (type) query.type = type;
+      const participantData = {
+        user: req.user._id,
+        role: MEETING_ROLES.PARTICIPANT,
+        deviceInfo: req.body.deviceInfo,
+        connectionInfo: {
+          ip: req.ip,
+          ...req.body.connectionInfo
+        }
+      };
 
-    const [meetings, total] = await Promise.all([
-      Meeting.find(query)
-        .sort({ startTime: -1 })
+      await meeting.addParticipant(participantData);
+
+      // Notify other participants
+      socketService.emitToRoom(
+        `meeting:${meeting._id}`,
+        'participant:joined',
+        {
+          meetingId: meeting._id,
+          participant: participantData
+        }
+      );
+
+      res.json({
+        success: true,
+        data: {
+          meeting,
+          config: WEBRTC_CONFIG
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // Leave meeting
+  async leaveMeeting(req, res, next) {
+    try {
+      const meeting = await Meeting.findById(req.params.id);
+      
+      if (!meeting) {
+        throw createError(404, 'Meeting not found');
+      }
+
+      await meeting.removeParticipant(req.user._id);
+
+      // Notify other participants
+      socketService.emitToRoom(
+        `meeting:${meeting._id}`,
+        'participant:left',
+        {
+          meetingId: meeting._id,
+          userId: req.user._id
+        }
+      );
+
+      res.json({
+        success: true,
+        message: 'Left meeting successfully'
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // End meeting (host only)
+  async endMeeting(req, res, next) {
+    try {
+      const meeting = await Meeting.findById(req.params.id);
+      
+      if (!meeting) {
+        throw createError(404, 'Meeting not found');
+      }
+
+      if (meeting.host.toString() !== req.user._id.toString()) {
+        throw createError(403, 'Only host can end meeting');
+      }
+
+      meeting.status = 'ended';
+      await meeting.save();
+
+      // Notify all participants
+      socketService.emitToRoom(
+        `meeting:${meeting._id}`,
+        'meeting:ended',
+        { meetingId: meeting._id }
+      );
+
+      res.json({
+        success: true,
+        message: 'Meeting ended successfully'
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  // List user's meetings
+  async listMeetings(req, res, next) {
+    try {
+      const { 
+        type = 'all',
+        status = 'all',
+        page = 1,
+        limit = 20,
+        sort = 'startTime',
+        order = 'desc'
+      } = req.query;
+
+      const query = {
+        $or: [
+          { host: req.user._id },
+          { 'participants.user': req.user._id }
+        ]
+      };
+
+      if (type !== 'all') {
+        query.type = type;
+      }
+
+      if (status !== 'all') {
+        query.status = status;
+      }
+
+      const sortOption = {
+        [sort]: order === 'desc' ? -1 : 1
+      };
+
+      const meetings = await Meeting.find(query)
+        .sort(sortOption)
         .skip((page - 1) * limit)
         .limit(limit)
-        .populate('host', 'name')
-        .lean(),
-      Meeting.countDocuments(query)
-    ]);
+        .populate('host', 'name email')
+        .populate('participants.user', 'name email');
 
-    res.json({
-      meetings: meetings.map(m => ({ ...m, password: undefined })),
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(total / limit),
-        totalMeetings: total
-      }
-    });
-  } catch (error) {
-    console.error('Get user meetings error:', error);
-    res.status(500).json({
-      message: 'Failed to fetch meetings',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+      const total = await Meeting.countDocuments(query);
+
+      res.json({
+        success: true,
+        data: {
+          meetings,
+          pagination: {
+            page: Number(page),
+            limit: Number(limit),
+            total,
+            pages: Math.ceil(total / limit)
+          }
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
   }
 };
+
+module.exports = meetingController;

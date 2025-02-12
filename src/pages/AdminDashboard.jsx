@@ -1,129 +1,124 @@
-import React, { useState } from 'react';
-import NotificationList from '../components/admin/NotificationList';
-import StatCard from '../components/admin/StatCard';
-import DisputesTable from '../components/admin/DisputesTable';
-import FreelancersTable from '../components/admin/FreelancersTable';
-import { useSocket } from '../hooks/useSocket';
+import { useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  UserGroupIcon,
+  BriefcaseIcon,
+  ShieldCheckIcon,
+  ExclamationTriangleIcon,
+  DocumentTextIcon,
+  CurrencyDollarIcon
+} from '@heroicons/react/24/outline';
+import LoadingSpinner from '../components/LoadingSpinner';
 import { useAdminData } from '../hooks/useAdminData';
-import { useAdminAuth } from '../hooks/useAdminAuth';
+import { captureException } from '../config/sentry';
 
-function AdminDashboard() {
-  const [timeRange, setTimeRange] = useState('week');
-  const { data, loading, fetchDashboardData, updateFreelancer, resolveDispute } = useAdminData();
-  const { hasPermission, loading: authLoading } = useAdminAuth();
-  
-  useSocket(() => fetchDashboardData(timeRange));
+const StatsCard = ({ title, value, icon: Icon, color, to }) => (
+  <Link 
+    to={to}
+    className="bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow"
+  >
+    <div className="flex items-center">
+      <div className={`p-3 rounded-lg ${color}`}>
+        <Icon className="h-6 w-6 text-white" />
+      </div>
+      <div className="ml-4">
+        <h3 className="text-lg font-medium text-gray-900">{title}</h3>
+        <p className="text-2xl font-semibold text-gray-700">{value}</p>
+      </div>
+    </div>
+  </Link>
+);
 
-  if (loading || authLoading) {
+/**
+ * Admin dashboard page showing key metrics and stats
+ * @returns {JSX.Element} AdminDashboard component
+ */
+const AdminDashboard = () => {
+  const { data, loading, error, fetchData } = useAdminData();
+
+  useEffect(() => {
+    try {
+      fetchData();
+    } catch (err) {
+      captureException(err, {
+        tags: { page: 'AdminDashboard' }
+      });
+    }
+  }, [fetchData]);
+
+  if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary" />
+      <div className="flex justify-center items-center h-96">
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
-  const tabs = {
-    overview: {
-      label: 'Overview',
-      permission: 'view_reports',
-      content: (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard
-            title="Total Users"
-            value={data.stats.totalUsers}
-            change={data.stats.userGrowth}
-          />
-          <StatCard
-            title="Active Jobs"
-            value={data.stats.totalJobs}
-          />
-          <StatCard
-            title="Platform Earnings"
-            value={data.stats.totalEarnings}
-            unit="$"
-          />
-          <StatCard
-            title="Dispute Rate"
-            value={data.stats.disputeRate}
-            unit="%"
-          />
-        </div>
-      )
+  if (error) {
+    return (
+      <div className="p-4 bg-red-50 rounded-lg">
+        <p className="text-red-700">{error}</p>
+      </div>
+    );
+  }
+
+  const stats = [
+    {
+      title: 'Total Users',
+      value: data?.users?.total || 0,
+      icon: UserGroupIcon,
+      color: 'bg-blue-600',
+      to: '/admin/users'
     },
-    freelancers: {
-      label: 'Freelancers',
-      permission: 'manage_freelancers',
-      content: (
-        <FreelancersTable
-          freelancers={data.freelancers}
-          onVerify={(id) => updateFreelancer(id, 'verify')}
-          onSuspend={(id) => updateFreelancer(id, 'suspend')}
-        />
-      )
+    {
+      title: 'Active Jobs',
+      value: data?.jobs?.active || 0,
+      icon: BriefcaseIcon,
+      color: 'bg-green-600',
+      to: '/admin/jobs'
     },
-    disputes: {
-      label: 'Disputes',
-      permission: 'manage_disputes',
-      content: (
-        <DisputesTable
-          disputes={data.disputes}
-          onResolve={resolveDispute}
-        />
-      )
+    {
+      title: 'Pending Verifications',
+      value: data?.verifications?.pending || 0,
+      icon: ShieldCheckIcon,
+      color: 'bg-yellow-600',
+      to: '/admin/verify'
+    },
+    {
+      title: 'Open Disputes',
+      value: data?.disputes?.open || 0,
+      icon: ExclamationTriangleIcon,
+      color: 'bg-red-600',
+      to: '/admin/disputes'
+    },
+    {
+      title: 'Contracts',
+      value: data?.contracts?.total || 0,
+      icon: DocumentTextIcon,
+      color: 'bg-purple-600',
+      to: '/admin/contracts'
+    },
+    {
+      title: 'Revenue',
+      value: `$${data?.revenue?.total || 0}`,
+      icon: CurrencyDollarIcon,
+      color: 'bg-indigo-600',
+      to: '/admin/revenue'
     }
-  };
-
-  // Filter tabs based on permissions
-  const availableTabs = Object.entries(tabs).filter(
-    ([_, tab]) => hasPermission(tab.permission)
-  );
-
-  const [activeTab, setActiveTab] = useState(availableTabs[0]?.[0] || '');
+  ];
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="container mx-auto px-4">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
-          <select
-            className="border rounded-lg px-4 py-2"
-            value={timeRange}
-            onChange={(e) => {
-              setTimeRange(e.target.value);
-              fetchDashboardData(e.target.value);
-            }}
-          >
-            <option value="day">Last 24 Hours</option>
-            <option value="week">Last Week</option>
-            <option value="month">Last Month</option>
-          </select>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex space-x-4 mb-8">
-          {availableTabs.map(([key, tab]) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={`px-4 py-2 rounded-lg capitalize ${
-                activeTab === key
-                  ? 'bg-primary text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-
-        {/* Content */}
-        <div className="space-y-6">
-          {activeTab && tabs[activeTab]?.content}
-        </div>
+    <div className="p-6">
+      <h1 className="text-2xl font-semibold text-gray-900 mb-6">
+        Admin Dashboard
+      </h1>
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {stats.map((stat) => (
+          <StatsCard key={stat.title} {...stat} />
+        ))}
       </div>
     </div>
   );
-}
+};
 
 export default AdminDashboard;

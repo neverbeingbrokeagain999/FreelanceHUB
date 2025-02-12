@@ -16,7 +16,7 @@ import React, { useState, useEffect } from 'react';
         const fetchDirectContracts = async () => {
           try {
             const token = localStorage.getItem('token');
-            const response = await fetch('http://localhost:5000/api/contracts', {
+            const response = await fetch('/api/contracts', {
               headers: {
                 'Authorization': `Bearer ${token}`,
               },
@@ -46,7 +46,7 @@ import React, { useState, useEffect } from 'react';
         e.preventDefault();
         try {
           const token = localStorage.getItem('token');
-          const response = await fetch('http://localhost:5000/api/contracts', {
+          const response = await fetch('/api/contracts', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -60,7 +60,7 @@ import React, { useState, useEffect } from 'react';
             const fetchDirectContracts = async () => {
               try {
                 const token = localStorage.getItem('token');
-                const response = await fetch('http://localhost:5000/api/direct-contracts', {
+                const response = await fetch('/api/direct-contracts', {
                   headers: {
                     'Authorization': `Bearer ${token}`,
                   },

@@ -1,59 +1,83 @@
 export default {
-  // Database settings
-  database: {
-    // Override with in-memory MongoDB settings from testDb.js
-  },
-
-  // JWT settings
-  jwt: {
-    secret: 'test-jwt-secret',
-    expiresIn: '1h'
-  },
-
-  // Auth settings
-  auth: {
-    // Disable rate limiting in test environment
-    rateLimit: false,
-    
-    // Use faster bcrypt rounds in test
-    saltRounds: 1,
-    
-    // Token settings
-    tokenExpiry: '15m',
-    refreshTokenExpiry: '7d'
-  },
-
-  // Logging settings
-  logging: {
-    // Suppress detailed logging in tests
-    level: 'error',
-    silent: true
-  },
-
-  // Server settings 
-  server: {
+  app: {
+    name: 'Freelance Platform',
+    environment: 'test',
     port: 5001,
-    host: 'localhost'
+    apiPrefix: '/api'
   },
-
-  // Cache settings
-  cache: {
-    // Disable caching in tests
-    enabled: false
-  },
-
-  // Monitoring settings
-  monitoring: {
-    // Disable monitoring in tests
-    enabled: false,
-    sentry: {
-      enabled: false
+  
+  database: {
+    url: 'mongodb://localhost:27017/flb61_test',
+    options: {
+      useNewUrlParser: true,
+      useUnifiedTopology: true
     }
   },
 
-  // Email settings
+  jwt: {
+    secret: 'test_jwt_secret_key_123456789',
+    expiresIn: '24h'
+  },
+
+  auth: {
+    allowAdminRegistration: true,
+    passwordMinLength: 8,
+    loginAttempts: {
+      maxAttempts: 5,
+      windowMs: 15 * 60 * 1000 // 15 minutes
+    },
+    verification: {
+      tokenExpiry: '24h',
+      emailResendDelay: 60 * 1000 // 1 minute
+    }
+  },
+
   email: {
-    // Disable actual email sending in tests
-    enabled: false
+    enabled: false,
+    from: 'test@example.com',
+    templates: {
+      verifyEmail: 'verify-email',
+      resetPassword: 'reset-password',
+      welcomeEmail: 'welcome-email'
+    }
+  },
+
+  security: {
+    bcryptRounds: 4, // Faster for tests
+    rateLimiting: {
+      windowMs: 15 * 60 * 1000,
+      maxRequests: 100
+    },
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+    }
+  },
+
+  audit: {
+    enabled: true,
+    retention: {
+      days: 1
+    },
+    criticalActions: [
+      'USER_ROLE_CHANGE',
+      'SYSTEM_CONFIG_UPDATE',
+      'SECURITY_SETTING_CHANGE'
+    ]
+  },
+
+  upload: {
+    maxSize: 5 * 1024 * 1024,
+    allowedTypes: ['image/jpeg', 'image/png', 'application/pdf']
+  },
+
+  cache: {
+    enabled: false,
+    ttl: 60 // 1 minute
+  },
+
+  logging: {
+    level: 'error',
+    silent: true
   }
 };

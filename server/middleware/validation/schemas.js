@@ -1,202 +1,210 @@
 import Joi from 'joi';
 
-// Common validation patterns
-const patterns = {
-  password: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/,
-  phone: /^\+?[1-9]\d{1,14}$/,
-};
-
-// Common validation messages
-const messages = {
-  password: 'Password must contain at least 8 characters, one uppercase letter, one lowercase letter, one number and one special character',
-  required: 'This field is required',
-  email: 'Please enter a valid email address',
-  phone: 'Please enter a valid phone number',
-};
-
-// Auth Schemas
-export const authSchemas = {
-  register: Joi.object({
-    email: Joi.string().email().required().messages({
-      'string.email': messages.email,
-      'any.required': messages.required,
-    }),
-    password: Joi.string().pattern(patterns.password).required().messages({
-      'string.pattern.base': messages.password,
-      'any.required': messages.required,
-    }),
-    name: Joi.string().min(2).max(50).required(),
-    role: Joi.string().valid('client', 'freelancer').required(),
+// Job action validation
+export const validateJobAction = {
+  params: Joi.object({
+    id: Joi.string().required(),
+    action: Joi.string().valid('approve', 'flag', 'remove').required()
   }),
-
-  login: Joi.object({
-    email: Joi.string().email().required(),
-    password: Joi.string().required(),
-  }),
-};
-
-// User Schemas
-export const userSchemas = {
-  updateProfile: Joi.object({
-    name: Joi.string().min(2).max(50),
-    bio: Joi.string().max(500),
-    skills: Joi.array().items(Joi.string()),
-    hourlyRate: Joi.number().min(0),
-    phone: Joi.string().pattern(patterns.phone).messages({
-      'string.pattern.base': messages.phone,
-    }),
-    location: Joi.object({
-      country: Joi.string(),
-      city: Joi.string(),
-    }),
-  }),
-
-  changePassword: Joi.object({
-    currentPassword: Joi.string().required(),
-    newPassword: Joi.string().pattern(patterns.password).required().messages({
-      'string.pattern.base': messages.password,
-      'any.required': messages.required,
-    }),
-  }),
-};
-
-// Job Schemas
-export const jobSchemas = {
-  create: Joi.object({
-    title: Joi.string().min(10).max(100).required(),
-    description: Joi.string().min(50).max(5000).required(),
-    budget: Joi.object({
-      minimum: Joi.number().min(0).required(),
-      maximum: Joi.number().min(Joi.ref('minimum')).required(),
-    }),
-    skills: Joi.array().items(Joi.string()).min(1).required(),
-    category: Joi.string().required(),
-    type: Joi.string().valid('fixed', 'hourly').required(),
-    duration: Joi.string().valid('short', 'medium', 'long').required(),
-    experience: Joi.string().valid('entry', 'intermediate', 'expert').required(),
-  }),
-
-  update: Joi.object({
-    title: Joi.string().min(10).max(100),
-    description: Joi.string().min(50).max(5000),
-    budget: Joi.object({
-      minimum: Joi.number().min(0),
-      maximum: Joi.number().min(Joi.ref('minimum')),
-    }),
-    skills: Joi.array().items(Joi.string()).min(1),
-    status: Joi.string().valid('draft', 'published', 'closed'),
-  }),
-};
-
-// Review Schemas
-export const reviewSchemas = {
-  create: Joi.object({
-    recipient: Joi.string().required(),
-    recipientRole: Joi.string().valid('client', 'freelancer').required(),
-    jobId: Joi.string().when('recipientRole', {
-      is: 'client',
-      then: Joi.required(),
-      otherwise: Joi.allow(null)
-    }),
-    title: Joi.string().min(5).max(100).required(),
-    content: Joi.string().min(10).max(2000).required(),
-    visibility: Joi.string().valid('public', 'private').default('public'),
-    ratings: Joi.object({
-      communication: Joi.number().min(1).max(5).required(),
-      quality: Joi.number().min(1).max(5).required(),
-      expertise: Joi.number().min(1).max(5).required(),
-      deadlines: Joi.number().min(1).max(5).required(),
-      cooperation: Joi.number().min(1).max(5).required(),
-      requirements: Joi.number().min(1).max(5),
-      paymentPromptness: Joi.number().min(1).max(5)
-    }).required(),
-    recommendations: Joi.object({
-      wouldHireAgain: Joi.boolean(),
-      wouldWorkAgain: Joi.boolean(),
-      recommendToOthers: Joi.boolean()
-    }).required()
-  }),
-  update: Joi.object({
-    title: Joi.string().min(5).max(100),
-    content: Joi.string().min(10).max(2000),
-    ratings: Joi.object({
-      communication: Joi.number().min(1).max(5),
-      quality: Joi.number().min(1).max(5),
-      expertise: Joi.number().min(1).max(5),
-      deadlines: Joi.number().min(1).max(5),
-      cooperation: Joi.number().min(1).max(5),
-      requirements: Joi.number().min(1).max(5),
-      paymentPromptness: Joi.number().min(1).max(5)
-    }),
-    visibility: Joi.string().valid('public', 'private'),
-    recommendations: Joi.object({
-      wouldHireAgain: Joi.boolean(),
-      wouldWorkAgain: Joi.boolean(),
-      recommendToOthers: Joi.boolean()
+  body: Joi.object({
+    reason: Joi.when('params.action', {
+      is: Joi.valid('flag', 'remove'),
+      then: Joi.string().min(10).required(),
+      otherwise: Joi.string().allow('')
     })
   })
 };
 
-// Payment Schemas
-export const paymentSchemas = {
-  createPayment: Joi.object({
-    amount: Joi.number().positive().required(),
-    currency: Joi.string().valid('USD', 'EUR', 'GBP', 'INR').required(),
-    paymentMethod: Joi.string().valid('stripe', 'paypal', 'razorpay').required(),
-    description: Joi.string().max(255),
-  }),
+// Batch job update validation
+export const validateBatchJobUpdate = {
+  body: Joi.object({
+    jobIds: Joi.array().items(Joi.string()).min(1).required(),
+    action: Joi.string().valid('approve', 'flag', 'remove').required(),
+    reason: Joi.when('action', {
+      is: Joi.valid('flag', 'remove'),
+      then: Joi.string().min(10).required(),
+      otherwise: Joi.string().allow('')
+    })
+  })
 };
 
-// Direct Contract Schemas
-export const contractSchemas = {
-  create: Joi.object({
-    title: Joi.string().min(10).max(100).required(),
-    description: Joi.string().min(50).max(2000).required(),
-    terms: Joi.string().min(50).max(5000).required(),
-    rate: Joi.number().positive().required(),
-    rateType: Joi.string().valid('hourly', 'fixed').required(),
-    startDate: Joi.date().min('now').required(),
-    expectedEndDate: Joi.date().min(Joi.ref('startDate')),
+// Profile verification validation
+export const validateProfileVerification = {
+  params: Joi.object({
+    profileId: Joi.string().required()
   }),
-};
-
-// Meeting Schemas
-export const meetingSchemas = {
-  create: Joi.object({
-    title: Joi.string().min(5).max(100).required(),
-    description: Joi.string().max(500),
-    scheduledFor: Joi.date().min('now').required(),
-    duration: Joi.number().min(15).max(180).required(), // duration in minutes
-    participants: Joi.array().items(Joi.string()).min(1).required(),
-  }),
-};
-
-// Job Match Schemas
-export const jobMatchSchemas = {
-  preferences: Joi.object({
-    skills: Joi.array().items(Joi.string()).min(1).required(),
-    hourlyRate: Joi.object({
-      minimum: Joi.number().min(0).required(),
-      maximum: Joi.number().min(Joi.ref('minimum')).required(),
-    }),
-    availability: Joi.string().valid('full-time', 'part-time', 'contract').required(),
-    categories: Joi.array().items(Joi.string()),
-  }),
-};
-
-// Work Diary Schemas
-export const workDiarySchemas = {
-  create: Joi.object({
-    contract: Joi.string().required(),
-    timeSpent: Joi.number().min(1).max(24).required(), // hours
-    description: Joi.string().min(10).max(500).required(),
-    date: Joi.date().max('now').required(),
-    activities: Joi.array().items(
+  body: Joi.object({
+    action: Joi.string().valid('approve', 'reject').required(),
+    reason: Joi.string().required(),
+    verificationDetails: Joi.alternatives().try(
       Joi.object({
-        type: Joi.string().valid('coding', 'meeting', 'research', 'other').required(),
-        duration: Joi.number().min(0).required(),
-        description: Joi.string().max(200),
-      })
-    ),
+        identityVerified: Joi.boolean(),
+        documentsVerified: Joi.boolean(),
+        skillsVerified: Joi.boolean(),
+        notes: Joi.string().allow(''),
+        verificationDate: Joi.date().default(Date.now)
+      }),
+      Joi.allow(null)
+    ).optional()
+  })
+};
+
+// Review validation schemas
+export const reviewSchemas = {
+  create: Joi.object({
+    rating: Joi.number().min(1).max(5).required(),
+    comment: Joi.string().min(10).max(1000).required(),
+    target: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required(),
+    type: Joi.string().valid('client', 'freelancer', 'job').required()
   }),
+  update: Joi.object({
+    rating: Joi.number().min(1).max(5),
+    comment: Joi.string().min(10).max(1000)
+  }).min(1)
+};
+
+// Dispute resolution validation
+export const validateDisputeResolution = {
+  params: Joi.object({
+    disputeId: Joi.string().required()
+  }),
+  body: Joi.object({
+    resolution: Joi.string().valid('refund', 'split', 'dismiss').required(),
+    reason: Joi.string().min(10).required(),
+    splitRatio: Joi.when('resolution', {
+      is: 'split',
+      then: Joi.object({
+        client: Joi.number().min(0).max(100).required(),
+        freelancer: Joi.number().min(0).max(100).required()
+      }).custom((value, helpers) => {
+        if (value.client + value.freelancer !== 100) {
+          return helpers.error('Split ratio must total 100%');
+        }
+        return value;
+      }),
+      otherwise: Joi.forbidden()
+    }),
+    refundAmount: Joi.when('resolution', {
+      is: 'refund',
+      then: Joi.number().min(0).required(),
+      otherwise: Joi.forbidden()
+    })
+  })
+};
+
+// Admin settings validation
+export const validateAdminSettings = {
+  body: Joi.object({
+    general: Joi.object({
+      siteName: Joi.string().min(1).max(100),
+      supportEmail: Joi.string().email(),
+      maintenanceMode: Joi.boolean(),
+      allowRegistration: Joi.boolean()
+    }),
+    security: Joi.object({
+      maxLoginAttempts: Joi.number().integer().min(1).max(10),
+      passwordMinLength: Joi.number().integer().min(8).max(32),
+      requireEmailVerification: Joi.boolean(),
+      twoFactorEnabled: Joi.boolean()
+    }),
+    jobs: Joi.object({
+      autoApproveJobs: Joi.boolean(),
+      minJobBudget: Joi.number().min(0),
+      maxJobBudget: Joi.number().min(0),
+      allowedCategories: Joi.array().items(Joi.string())
+    }),
+    payments: Joi.object({
+      minimumWithdrawal: Joi.number().min(0),
+      platformFee: Joi.number().min(0).max(100),
+      paymentMethods: Joi.array().items(Joi.string())
+    }),
+    notifications: Joi.object({
+      emailNotifications: Joi.boolean(),
+      pushNotifications: Joi.boolean(),
+      notificationTypes: Joi.array().items(Joi.string())
+    })
+  }).min(1)
+};
+
+// Report generation validation
+export const validateReportGeneration = {
+  body: Joi.object({
+    type: Joi.string().valid(
+      'jobs',
+      'users',
+      'payments',
+      'disputes',
+      'audit-logs'
+    ).required(),
+    dateRange: Joi.object({
+      start: Joi.date().required(),
+      end: Joi.date().min(Joi.ref('start')).required()
+    }),
+    format: Joi.string().valid('csv', 'pdf', 'xlsx').required(),
+    filters: Joi.object({
+      status: Joi.array().items(Joi.string()),
+      category: Joi.array().items(Joi.string()),
+      minAmount: Joi.number().min(0),
+      maxAmount: Joi.number().min(0)
+    })
+  })
+};
+
+// Job list filters validation
+export const validateJobFilters = {
+  query: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(10),
+    search: Joi.string().allow(''),
+    status: Joi.string().valid('all', 'pending', 'active', 'completed', 'flagged'),
+    category: Joi.string(),
+    minBudget: Joi.number().min(0),
+    maxBudget: Joi.number().min(0),
+    sortBy: Joi.string().valid('createdAt', 'budget', 'title'),
+    sortOrder: Joi.string().valid('asc', 'desc').default('desc'),
+    clientId: Joi.string(),
+    freelancerId: Joi.string()
+  })
+};
+
+// Profile list filters validation
+export const validateProfileFilters = {
+  query: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(10),
+    search: Joi.string().allow(''),
+    status: Joi.string().valid('all', 'pending', 'approved', 'rejected'),
+    type: Joi.string().valid('all', 'freelancer', 'client'),
+    skills: Joi.array().items(Joi.string()),
+    sortBy: Joi.string().valid('createdAt', 'name', 'status'),
+    sortOrder: Joi.string().valid('asc', 'desc').default('desc')
+  })
+};
+
+// Dispute list filters validation
+export const validateDisputeFilters = {
+  query: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(10),
+    search: Joi.string().allow(''),
+    status: Joi.string().valid('all', 'open', 'resolved', 'closed'),
+    type: Joi.string().valid('all', 'payment', 'quality', 'communication'),
+    minAmount: Joi.number().min(0),
+    maxAmount: Joi.number().min(0),
+    sortBy: Joi.string().valid('createdAt', 'amount', 'status'),
+    sortOrder: Joi.string().valid('asc', 'desc').default('desc')
+  })
+};
+
+export default {
+  validateJobAction,
+  validateBatchJobUpdate,
+  validateProfileVerification,
+  validateDisputeResolution,
+  validateAdminSettings,
+  validateReportGeneration,
+  validateJobFilters,
+  validateProfileFilters,
+  validateDisputeFilters,
+  reviewSchemas
 };

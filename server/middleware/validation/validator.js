@@ -1,205 +1,114 @@
-import logger from '../../config/logger.js';
-
 /**
- * Creates a validation middleware using a Joi schema
- * @param {Object} schema - Joi schema to validate against
- * @param {string} property - Request property to validate (body, query, params)
- * @returns {Function} Express middleware function
+ * Validation middleware factory using Joi schemas
+ * @param {Object} schema - Joi validation schema object
  */
-export const validate = (schema, property = 'body') => {
+export const validate = (schema) => {
   return (req, res, next) => {
-    const { error, value } = schema.validate(req[property], {
-      abortEarly: false,
-      stripUnknown: true,
-      errors: {
-        wrap: {
-          label: '',
-        },
-      },
+    const validationResults = {};
+    const validationOptions = {
+      abortEarly: false, // Include all errors
+      allowUnknown: true, // Allow unknown props
+      stripUnknown: true // Remove unknown props
+    };
+
+    // Validate request parts based on schema
+    ['params', 'query', 'body'].forEach((key) => {
+      if (schema[key]) {
+        const validation = schema[key].validate(req[key], validationOptions);
+        if (validation.error) {
+          validationResults[key] = validation.error.details.map(detail => ({
+            message: detail.message.replace(/['"]/g, ''),
+            path: detail.path
+          }));
+        } else {
+          // Replace request data with validated data
+          req[key] = validation.value;
+        }
+      }
     });
 
-    if (error) {
-      const errorMessage = error.details
-        .map((detail) => detail.message)
-        .join(', ');
-
-      logger.warn('Validation error:', {
-        path: req.path,
-        method: req.method,
-        errors: errorMessage,
-        body: property === 'body' ? req.body : undefined,
-        query: property === 'query' ? req.query : undefined,
-        params: property === 'params' ? req.params : undefined,
-      });
-
+    if (Object.keys(validationResults).length > 0) {
       return res.status(400).json({
-        message: 'Validation Error',
-        errors: error.details.map((detail) => ({
-          field: detail.context.key,
-          message: detail.message,
-        })),
+        success: false,
+        message: 'Validation failed',
+        errors: validationResults
       });
     }
 
-    // Replace request data with validated data
-    req[property] = value;
-    next();
+    return next();
   };
 };
 
 /**
- * Validates request against multiple schemas
- * @param {Object} schemas - Object containing schema definitions for different parts of request
- * @returns {Function} Express middleware function
+ * Validates query parameters for pagination
  */
-export const validateRequest = (schemas) => {
-  return (req, res, next) => {
-    const validationPromises = Object.entries(schemas).map(([property, schema]) => {
-      if (!req[property]) {
-        return Promise.resolve();
-      }
+export const validatePagination = (req, res, next) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
 
-      const { error, value } = schema.validate(req[property], {
-        abortEarly: false,
-        stripUnknown: true,
-        errors: {
-          wrap: {
-            label: '',
-          },
-        },
-      });
-
-      if (error) {
-        return Promise.reject({
-          property,
-          errors: error.details.map((detail) => ({
-            field: detail.context.key,
-            message: detail.message,
-          })),
-        });
-      }
-
-      req[property] = value;
-      return Promise.resolve();
+  // Validate pagination parameters
+  if (page < 1) {
+    return res.status(400).json({
+      success: false,
+      message: 'Page number must be greater than 0'
     });
+  }
 
-    Promise.all(validationPromises)
-      .then(() => next())
-      .catch((error) => {
-        logger.warn('Validation error:', {
-          path: req.path,
-          method: req.method,
-          errors: error,
-        });
+  if (limit < 1 || limit > 100) {
+    return res.status(400).json({
+      success: false,
+      message: 'Limit must be between 1 and 100'
+    });
+  }
 
-        res.status(400).json({
-          message: 'Validation Error',
-          errors: {
-            [error.property]: error.errors,
-          },
-        });
-      });
+  // Add validated pagination to request
+  req.pagination = {
+    page,
+    limit,
+    skip: (page - 1) * limit
   };
+
+  next();
 };
 
 /**
- * Example usage:
- * 
- * Single schema validation:
- * router.post('/users', validate(userSchemas.create), userController.create);
- * 
- * Multiple schema validation:
- * router.post('/jobs', validateRequest({
- *   body: jobSchemas.create,
- *   query: jobSchemas.filters
- * }), jobController.create);
+ * Validates and sanitizes sort parameters
+ * @param {string[]} allowedFields - Array of field names that can be sorted
  */
-
-// Custom validation middleware for file uploads
-export const validateFileUpload = (options = {}) => {
-  const {
-    maxSize = 5 * 1024 * 1024, // 5MB default
-    allowedTypes = ['image/jpeg', 'image/png', 'image/gif'],
-    maxFiles = 1,
-  } = options;
-
+export const validateSort = (allowedFields) => {
   return (req, res, next) => {
-    if (!req.files && !req.file) {
-      return res.status(400).json({
-        message: 'Validation Error',
-        errors: [{ field: 'file', message: 'No file uploaded' }],
-      });
-    }
-
-    const files = req.files || [req.file];
-
-    if (files.length > maxFiles) {
-      return res.status(400).json({
-        message: 'Validation Error',
-        errors: [{ field: 'file', message: `Maximum ${maxFiles} files allowed` }],
-      });
-    }
-
-    const validationErrors = [];
-
-    files.forEach((file) => {
-      if (file.size > maxSize) {
-        validationErrors.push({
-          field: file.fieldname,
-          message: `File size exceeds ${maxSize / (1024 * 1024)}MB limit`,
-        });
-      }
-
-      if (!allowedTypes.includes(file.mimetype)) {
-        validationErrors.push({
-          field: file.fieldname,
-          message: `Invalid file type. Allowed types: ${allowedTypes.join(', ')}`,
-        });
-      }
-    });
-
-    if (validationErrors.length > 0) {
-      logger.warn('File validation error:', {
-        path: req.path,
-        method: req.method,
-        errors: validationErrors,
-      });
-
-      return res.status(400).json({
-        message: 'File Validation Error',
-        errors: validationErrors,
-      });
-    }
-
-    next();
-  };
-};
-
-// Sanitize middleware to clean input data
-export const sanitize = (schema) => {
-  return (req, res, next) => {
-    if (!req.body || typeof req.body !== 'object') {
+    const sort = req.query.sort;
+    if (!sort) {
+      req.sortOptions = { createdAt: -1 }; // Default sort
       return next();
     }
 
     try {
-      // Remove any potential XSS or injection attempts
-      const sanitized = Object.keys(req.body).reduce((acc, key) => {
-        if (typeof req.body[key] === 'string') {
-          acc[key] = req.body[key]
-            .replace(/[<>]/g, '') // Remove potential HTML tags
-            .trim(); // Remove leading/trailing whitespace
-        } else {
-          acc[key] = req.body[key];
+      const sortFields = sort.split(',').reduce((acc, field) => {
+        const order = field.startsWith('-') ? -1 : 1;
+        const cleanField = field.replace(/^-/, '');
+
+        if (!allowedFields.includes(cleanField)) {
+          throw new Error(`Invalid sort field: ${cleanField}`);
         }
+
+        acc[cleanField] = order;
         return acc;
       }, {});
 
-      req.body = sanitized;
+      req.sortOptions = sortFields;
       next();
     } catch (error) {
-      logger.error('Sanitization error:', error);
-      next(error);
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Invalid sort parameters'
+      });
     }
   };
+};
+
+export default {
+  validate,
+  validatePagination,
+  validateSort
 };

@@ -1,146 +1,269 @@
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import compression from 'compression';
-import morgan from 'morgan';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
+// Configure dotenv before any imports
 import dotenv from 'dotenv';
-import * as Sentry from '@sentry/node';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import connectDB from './config/database.js';
-import logger from './config/logger.js';
-import errorHandler from './utils/errorHandler.js';
+// Load environment variables from root .env
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
-// Routes
+// Log loaded config
+console.log('Loaded environment:', {
+  NODE_ENV: process.env.NODE_ENV,
+  MONGODB_URI: process.env.MONGODB_URI ? 'Set' : 'Not set'
+});
+
+import express from 'express';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import { connectDB } from './config/database.js';
+import { initRedis } from './config/redis.js';
+import { errorHandler } from './utils/errorHandler.js';
+import { logger } from './config/logger.js';
+import { getConfig } from './config/index.js';
+
+import mongoose from 'mongoose';
 import authRoutes from './routes/auth.js';
-import userRoutes from './routes/user.js';
+import projectTemplateRoutes from './routes/projectTemplate.js';
 import jobRoutes from './routes/job.js';
+import userRoutes from './routes/user.js';
 import reviewRoutes from './routes/review.js';
+import chatRoutes from './routes/chat.js';
+import notificationRoutes from './routes/notification.js';
 import paymentRoutes from './routes/payment.js';
 import adminRoutes from './routes/admin.js';
-import directContractRoutes from './routes/directContract.js';
 
-// Load environment variables from .env or .env.test based on NODE_ENV
-if (process.env.NODE_ENV === 'test') {
-  dotenv.config({ path: '.env.test' });
-} else {
-  dotenv.config();
-}
-
-// Set default NODE_ENV if not set
-process.env.NODE_ENV = process.env.NODE_ENV || 'development';
-
-// Create Express app
+// Initialize express
 const app = express();
 
-// Initialize Sentry
-if (process.env.SENTRY_DSN) {
-  Sentry.init({
-    dsn: process.env.SENTRY_DSN,
-    environment: process.env.NODE_ENV,
-    integrations: [
-      new Sentry.Integrations.Http({ tracing: true }),
-      new Sentry.Integrations.Express({ app }),
-      new Sentry.Integrations.Mongo(),
-    ],
-    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+// Configure middleware
+const configureMiddleware = () => {
+  // Security middleware
+  app.use(helmet());
+
+  // Rate limiting
+  const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
   });
+  app.use('/api/', limiter);
 
-  // RequestHandler creates a separate execution context using domains
-  app.use(Sentry.Handlers.requestHandler());
-  // TracingHandler creates a trace for every incoming request
-  app.use(Sentry.Handlers.tracingHandler());
-}
+  // Body parsing middleware
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(cookieParser());
 
-// Security and middleware configuration
-import configSecurity from './config/security.js';
-configSecurity(app);
-app.use(compression()); // Compress responses
-app.use(express.json({ limit: '10mb' })); // Parse JSON bodies
-app.use(express.urlencoded({ extended: true, limit: '10mb' })); // Parse URL-encoded bodies
-
-// Logging
-if (process.env.NODE_ENV === 'development') {
-  app.use(morgan('dev', { stream: logger.stream }));
-} else {
-  app.use(morgan('combined', { stream: logger.stream }));
-}
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', environment: process.env.NODE_ENV });
-});
-
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/jobs', jobRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/direct-contracts', directContractRoutes);
-
-// Serve static files in production and handle client-side routing
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static('dist'));
-}
-
-// Handle client-side routing
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api/')) {
-    return next();
-  }
-  
-  if (process.env.NODE_ENV === 'production') {
-    res.sendFile(path.join(__dirname, '../dist/index.html'));
+  // CORS configuration
+  if (process.env.NODE_ENV !== 'production') {
+    app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Origin', req.headers.origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+      
+      if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+      }
+      next();
+    });
   } else {
-    res.redirect('http://localhost:3000' + req.path);
+    const corsOptions = {
+      origin: process.env.CORS_ORIGIN,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      optionsSuccessStatus: 200
+    };
+    app.use(cors(corsOptions));
   }
+};
+
+// Configure routes
+const configureRoutes = () => {
+  // API routes
+  app.use('/api/auth', authRoutes);
+  app.use('/api/project-templates', projectTemplateRoutes);
+  app.use('/api/jobs', jobRoutes);
+  app.use('/api/users', userRoutes);
+  app.use('/api/reviews', reviewRoutes);
+  app.use('/api/chat', chatRoutes);
+  app.use('/api/notifications', notificationRoutes);
+  app.use('/api/payments', paymentRoutes);
+  app.use('/api/admin', adminRoutes);
+};
+
+// Initialize server function
+const initializeServer = async () => {
+  try {
+    // Configure express middleware
+    logger.info('Configuring middleware...');
+    configureMiddleware();
+
+    // Connect to MongoDB
+    logger.info('Connecting to MongoDB...');
+    const dbConnection = await connectDB().catch(err => {
+      logger.error('MongoDB connection error:', err);
+      throw new Error('Failed to connect to MongoDB');
+    });
+
+    // Connect to Redis
+    logger.info('Connecting to Redis...');
+    const redisClient = await initRedis().catch(err => {
+      logger.error('Redis connection error:', err);
+      throw new Error('Failed to connect to Redis');
+    });
+
+    // Store redis client for health checks
+    app.set('redisClient', redisClient);
+
+    // Configure routes after database connections are established
+    logger.info('Configuring routes...');
+    configureRoutes();
+
+    // Health check route
+    app.get('/health', (req, res) => {
+      const redis = app.get('redisClient');
+      res.status(200).json({
+        status: 'success',
+        message: 'Server is healthy',
+        timestamp: new Date().toISOString(),
+        redis: redis?.status || 'not connected',
+        mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+      });
+    });
+
+    // Error handling
+    app.use(errorHandler);
+
+    // Handle unhandled routes
+    app.use('*', (req, res) => {
+      res.status(404).json({
+        success: false,
+        message: `Cannot ${req.method} ${req.originalUrl}`
+      });
+    });
+
+    // Start server
+    const PORT = process.env.PORT || 5000;
+    const server = app.listen(PORT, () => {
+      logger.info(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+    });
+
+    // Store server instance for graceful shutdown
+    app.set('server', server);
+
+    // Return server instance
+    return server;
+  } catch (error) {
+    logger.error('Failed to initialize server:', error);
+    process.exit(1);
+  }
+};
+
+const config = getConfig();
+
+// Graceful shutdown handler
+const shutdownGracefully = async () => {
+  try {
+    logger.info('Received shutdown signal. Closing server gracefully...');
+    
+    // Set a global shutdown timeout
+    const shutdownTimeout = setTimeout(() => {
+      logger.error('Forced shutdown due to timeout');
+      process.exit(1);
+    }, config.server.shutdownTimeout);
+
+    // Close HTTP server and drain connections
+    const server = app.get('server');
+    if (server) {
+      logger.info('Stopping new connections...');
+      server.unref(); // Stop accepting new connections
+
+      // Wait for connection draining
+      await new Promise(resolve => setTimeout(resolve, config.server.drainTimeout));
+      
+      try {
+        await Promise.race([
+          new Promise((resolve) => {
+            server.close(() => {
+              logger.info('HTTP server closed');
+              resolve();
+            });
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Server close timeout')), config.server.connectionTimeout)
+          )
+        ]);
+      } catch (err) {
+        logger.warn('HTTP server close warning:', err.message);
+      }
+    }
+
+    // Close database connections
+    if (mongoose.connection.readyState === 1) {
+      try {
+        await Promise.race([
+          mongoose.connection.close(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('MongoDB close timeout')), config.server.databaseTimeout)
+          )
+        ]);
+        logger.info('MongoDB connection closed');
+      } catch (err) {
+        logger.warn('MongoDB close warning:', err.message);
+      }
+    }
+    
+    const redis = app.get('redisClient');
+    if (redis && redis.status === 'ready') {
+      try {
+        await Promise.race([
+          redis.quit(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Redis close timeout')), config.server.databaseTimeout)
+          )
+        ]);
+        logger.info('Redis connection closed');
+      } catch (err) {
+        logger.warn('Redis close warning:', err.message);
+      }
+    }
+
+    // Clear the global shutdown timeout
+    clearTimeout(shutdownTimeout);
+    
+    logger.info('Server shutdown complete');
+    process.exit(0);
+  } catch (error) {
+    logger.error('Error during graceful shutdown:', error);
+    process.exit(1);
+  }
+};
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', error);
+  shutdownGracefully();
 });
 
-// Error handling
-if (process.env.SENTRY_DSN) {
-  app.use(Sentry.Handlers.errorHandler());
-}
-app.use(errorHandler);
-
-// Create HTTP server
-const httpServer = createServer(app);
-
-// Initialize Socket.IO
-const whitelist = (process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'])
-  .map(origin => origin.trim());
-
-const io = new Server(httpServer, {
-  cors: {
-    origin: whitelist,
-    methods: ['GET', 'POST'],
-    credentials: true,
-  },
-  pingTimeout: 60000,
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (error) => {
+  logger.error('Unhandled Rejection:', error);
+  shutdownGracefully();
 });
 
-// Socket.IO middleware and event handlers
-io.use((socket, next) => {
-  // Add authentication middleware here
-  next();
+// Handle termination signals
+process.on('SIGTERM', shutdownGracefully);
+process.on('SIGINT', shutdownGracefully);
+
+// Start server
+initializeServer().catch((error) => {
+  logger.error('Initialization error:', error);
+  process.exit(1);
 });
 
-io.on('connection', (socket) => {
-  logger.info(`Socket connected: ${socket.id}`);
-
-  socket.on('disconnect', () => {
-    logger.info(`Socket disconnected: ${socket.id}`);
-  });
-});
-
-// Exports
-const defaultExport = app; // For backward compatibility
-export { httpServer, io };
-export default defaultExport;
+export default app;

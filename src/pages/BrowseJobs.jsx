@@ -1,112 +1,169 @@
-import React, { useState, useEffect } from 'react';
-    import { Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useAuth } from '../hooks/useAuth';
 
-    function BrowseJobs() {
-      const [jobs, setJobs] = useState([]);
-      const [loading, setLoading] = useState(true);
-      const [search, setSearch] = useState('');
-      const [categories, setCategories] = useState('');
-      const [minBudget, setMinBudget] = useState('');
-      const [maxBudget, setMaxBudget] = useState('');
-      const [location, setLocation] = useState('');
+const BrowseJobs = () => {
+  const { user } = useAuth();
+  
+  // Mock data for jobs
+  const [jobs] = useState([
+    {
+      id: 1,
+      title: 'Full Stack Web Application Development',
+      description: 'Looking for an experienced developer to build a complete web application using React and Node.js',
+      budget: '$3,000 - $5,000',
+      skills: ['React', 'Node.js', 'MongoDB', 'Express'],
+      postedDate: '2 hours ago',
+      proposals: 5,
+      clientRating: 4.8,
+      projectLength: 'Medium-term',
+      experienceLevel: 'Intermediate'
+    },
+    {
+      id: 2,
+      title: 'Mobile App UI/UX Design',
+      description: 'Need a talented designer for our iOS and Android app redesign project',
+      budget: '$2,000 - $3,000',
+      skills: ['UI Design', 'UX Design', 'Figma', 'Mobile Design'],
+      postedDate: '5 hours ago',
+      proposals: 8,
+      clientRating: 4.9,
+      projectLength: 'Short-term',
+      experienceLevel: 'Expert'
+    },
+    {
+      id: 3,
+      title: 'WordPress Website Development',
+      description: 'Create a custom WordPress theme and plugin for an e-commerce site',
+      budget: '$1,500 - $2,500',
+      skills: ['WordPress', 'PHP', 'MySQL', 'WooCommerce'],
+      postedDate: '1 day ago',
+      proposals: 12,
+      clientRating: 4.7,
+      projectLength: 'Short-term',
+      experienceLevel: 'Intermediate'
+    }
+  ]);
 
-      useEffect(() => {
-        const fetchJobs = async () => {
-          try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`http://localhost:5000/api/jobs/freelancer?search=${search}&categories=${categories}&minBudget=${minBudget}&maxBudget=${maxBudget}&location=${location}`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-              },
-            });
-            if (response.ok) {
-              const responseData = await response.json();
-              if (responseData && Array.isArray(responseData.data)) {
-                setJobs(responseData.data);
-              } else {
-                setJobs([]);
-              }
-              setLoading(false);
-            } else {
-              console.error('Failed to fetch jobs:', response.statusText);
-              setLoading(false);
-            }
-          } catch (error) {
-            console.error('Error fetching jobs:', error);
-            setLoading(false);
-          }
-        };
+  const filters = {
+    projectLength: ['Short-term', 'Medium-term', 'Long-term'],
+    experienceLevel: ['Entry', 'Intermediate', 'Expert'],
+    budget: ['$500 - $1,000', '$1,000 - $5,000', '$5,000+']
+  };
 
-        fetchJobs();
-      }, [search, categories, minBudget, maxBudget, location]);
+  return (
+    <div className="bg-gray-50 min-h-screen py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-4 gap-6">
+          {/* Filters Sidebar */}
+          <div className="col-span-1">
+            <div className="bg-white shadow rounded-lg p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Filters</h3>
+              
+              {/* Project Length Filter */}
+              <div className="mb-6">
+                <h4 className="font-medium text-gray-700 mb-2">Project Length</h4>
+                {filters.projectLength.map((option) => (
+                  <label key={option} className="flex items-center mb-2">
+                    <input
+                      type="checkbox"
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="ml-2 text-gray-600">{option}</span>
+                  </label>
+                ))}
+              </div>
 
-      if (loading) {
-        return <div className="min-h-screen bg-light py-20">Loading...</div>;
-      }
+              {/* Experience Level Filter */}
+              <div className="mb-6">
+                <h4 className="font-medium text-gray-700 mb-2">Experience Level</h4>
+                {filters.experienceLevel.map((option) => (
+                  <label key={option} className="flex items-center mb-2">
+                    <input
+                      type="checkbox"
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="ml-2 text-gray-600">{option}</span>
+                  </label>
+                ))}
+              </div>
 
-      return (
-        <div className="min-h-screen bg-light py-20">
-          <div className="container mx-auto px-6">
-            <div className="text-center mb-12">
-              <h1 className="text-4xl font-bold text-dark mb-4 font-serif">Browse Jobs</h1>
-              <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-                Explore available job listings and find opportunities that match your skills.
-              </p>
+              {/* Budget Filter */}
+              <div>
+                <h4 className="font-medium text-gray-700 mb-2">Budget</h4>
+                {filters.budget.map((option) => (
+                  <label key={option} className="flex items-center mb-2">
+                    <input
+                      type="checkbox"
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="ml-2 text-gray-600">{option}</span>
+                  </label>
+                ))}
+              </div>
             </div>
-            <div className="mb-6 flex space-x-4">
-              <input
-                type="text"
-                placeholder="Search by keywords"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="shadow appearance-none border rounded w-1/4 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              />
-              <input
-                type="text"
-                placeholder="Categories (comma-separated)"
-                value={categories}
-                onChange={(e) => setCategories(e.target.value)}
-                className="shadow appearance-none border rounded w-1/4 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              />
-              <input
-                type="number"
-                placeholder="Min Budget"
-                value={minBudget}
-                onChange={(e) => setMinBudget(e.target.value)}
-                className="shadow appearance-none border rounded w-1/8 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              />
-              <input
-                type="number"
-                placeholder="Max Budget"
-                value={maxBudget}
-                onChange={(e) => setMaxBudget(e.target.value)}
-                className="shadow appearance-none border rounded w-1/8 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              />
-              <input
-                type="text"
-                placeholder="Location"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                className="shadow appearance-none border rounded w-1/4 py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              />
+          </div>
+
+          {/* Jobs List */}
+          <div className="col-span-3">
+            <div className="mb-6 flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-900">Available Jobs</h2>
+              <div className="flex space-x-2">
+                <select className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                  <option>Most Recent</option>
+                  <option>Best Match</option>
+                  <option>Budget: High to Low</option>
+                  <option>Budget: Low to High</option>
+                </select>
+              </div>
             </div>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+            <div className="space-y-4">
               {jobs.map((job) => (
-                <div key={job._id} className="bg-white p-6 rounded-xl shadow-sm">
-                  <h3 className="text-xl font-semibold mb-2 font-serif">{job.title}</h3>
-                  <p className="text-gray-600 mb-4">Category: {job.category}</p>
-                  <p className="text-gray-600 mb-4">Budget: ${job.budget}</p>
-                  <div className="text-right">
-                    <Link to={`/job/${job._id}`} className="bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-secondary transition">
-                      View Details
-                    </Link>
+                <div key={job.id} className="bg-white shadow rounded-lg p-6 hover:shadow-lg transition-shadow">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="text-xl font-semibold text-gray-900">{job.title}</h3>
+                      <p className="mt-2 text-gray-600">{job.description}</p>
+                    </div>
+                    <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                      Apply Now
+                    </button>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {job.skills.map((skill) => (
+                      <span
+                        key={skill}
+                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 flex items-center text-sm text-gray-500 space-x-4">
+                    <span>Posted {job.postedDate}</span>
+                    <span>•</span>
+                    <span>{job.budget}</span>
+                    <span>•</span>
+                    <span>{job.proposals} proposals</span>
+                    <span>•</span>
+                    <span>Client rating: {job.clientRating}/5</span>
+                  </div>
+
+                  <div className="mt-2 flex items-center text-sm text-gray-500 space-x-4">
+                    <span>{job.projectLength}</span>
+                    <span>•</span>
+                    <span>{job.experienceLevel} level</span>
                   </div>
                 </div>
               ))}
             </div>
           </div>
         </div>
-      );
-    }
+      </div>
+    </div>
+  );
+};
 
-    export default BrowseJobs;
+export default BrowseJobs;

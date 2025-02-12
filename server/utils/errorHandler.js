@@ -1,106 +1,74 @@
-import logger from '../config/logger.js';
-
-// Custom Error class for API errors
-export class APIError extends Error {
-  constructor(statusCode, message, errors = []) {
+class ApiError extends Error {
+  constructor(statusCode, message) {
     super(message);
     this.statusCode = statusCode;
-    this.errors = errors;
     this.status = `${statusCode}`.startsWith('4') ? 'fail' : 'error';
-    this.isOperational = true;
-
     Error.captureStackTrace(this, this.constructor);
   }
 }
 
-// Simple error response helper
-export const errorResponse = (res, statusCode, message, errors = []) => {
-  return res.status(statusCode).json({
-    status: `${statusCode}`.startsWith('4') ? 'fail' : 'error',
-    message,
-    errors
-  });
+class BadRequestError extends ApiError {
+  constructor(message = 'Bad request') {
+    super(400, message);
+  }
+}
+
+class UnauthorizedError extends ApiError {
+  constructor(message = 'Unauthorized') {
+    super(401, message);
+  }
+}
+
+class ForbiddenError extends ApiError {
+  constructor(message = 'Forbidden') {
+    super(403, message);
+  }
+}
+
+class NotFoundError extends ApiError {
+  constructor(message = 'Resource not found') {
+    super(404, message);
+  }
+}
+
+// Global error response formatter
+export const errorResponse = (res, statusCode = 500, message = 'Internal server error', errors = null) => {
+  const response = {
+    "success": false,
+    "message": message,
+    ...(errors && { "errors": errors })
+  };
+  return res.status(statusCode).json(response);
 };
 
-// Error handler middleware
-const errorHandler = (err, req, res, next) => {
-  err.statusCode = err.statusCode || 500;
-  err.status = err.status || 'error';
+// Global error handler middleware
+export const errorHandler = (err, req, res, next) => {
+  console.error('Error:', err);
 
-  // Log error
-  logger.error('Error:', {
-    message: err.message,
-    stack: err.stack,
-    statusCode: err.statusCode,
-    path: req.path,
-    method: req.method,
-    body: req.body,
-    params: req.params,
-    query: req.query,
-    user: req.user ? req.user.id : null
-  });
-
-  // Development error response
-  if (process.env.NODE_ENV === 'development') {
-    return res.status(err.statusCode).json({
-      status: err.status,
-      error: err,
-      message: err.message,
-      stack: err.stack,
-      errors: err.errors
-    });
+  if (err instanceof ApiError) {
+    return errorResponse(res, err.statusCode, err.message);
   }
 
-  // Production error response
-  if (err.isOperational) {
-    // Operational, trusted error: send message to client
-    return res.status(err.statusCode).json({
-      status: err.status,
-      message: err.message,
-      errors: err.errors
-    });
+  // Handle Mongoose validation errors
+  if (err.name === 'ValidationError') {
+    const errors = Object.values(err.errors).map(e => e.message);
+    return errorResponse(res, 400, 'Validation Error', errors);
   }
 
-  // Programming or other unknown error: don't leak error details
-  logger.error('💥 Unexpected error:', err);
-  return res.status(500).json({
-    status: 'error',
-    message: 'Something went wrong'
-  });
+  // Handle MongoDB duplicate key errors
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyValue)[0];
+    return errorResponse(res, 400, `Duplicate value for ${field}`);
+  }
+
+  // Generic error response for unhandled errors
+  return errorResponse(res, 500, 'Internal Server Error');
 };
 
-// Handle specific errors
-export const handleValidationError = (err) => {
-  const errors = Object.values(err.errors).map(el => el.message);
-  const message = `Invalid input data. ${errors.join('. ')}`;
-  return new APIError(400, message, errors);
+export {
+  ApiError,
+  BadRequestError,
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError
 };
-
-export const handleDuplicateFieldsError = (err) => {
-  const value = err.errmsg.match(/(["'])(\\?.)*?\1/)[0];
-  const message = `Duplicate field value: ${value}. Please use another value!`;
-  return new APIError(400, message);
-};
-
-export const handleCastError = (err) => {
-  const message = `Invalid ${err.path}: ${err.value}`;
-  return new APIError(400, message);
-};
-
-export const handleJsonWebTokenError = () => 
-  new APIError(401, 'Invalid token. Please log in again.');
-
-export const handleTokenExpiredError = () =>
-  new APIError(401, 'Your token has expired. Please log in again.');
-
-// Function to convert Mongoose validation errors to APIError
-export const handleMongooseError = (err) => {
-  if (err.name === 'ValidationError') return handleValidationError(err);
-  if (err.code === 11000) return handleDuplicateFieldsError(err);
-  if (err.name === 'CastError') return handleCastError(err);
-  if (err.name === 'JsonWebTokenError') return handleJsonWebTokenError();
-  if (err.name === 'TokenExpiredError') return handleTokenExpiredError();
-  return err;
-};
-
-export default errorHandler;

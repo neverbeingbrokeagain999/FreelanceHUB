@@ -1,152 +1,150 @@
 import mongoose from 'mongoose';
-import logger from '../config/logger.js';
 
 const auditLogSchema = new mongoose.Schema({
-  // Event Information
-  event: {
-    type: String,
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: true,
     index: true
   },
-  category: {
-    type: String,
-    required: true,
-    enum: [
-      'auth',
-      'user',
-      'job',
-      'contract',
-      'payment',
-      'dispute',
-      'review',
-      'admin',
-      'system',
-      'security'
-    ],
-    index: true
-  },
-  severity: {
-    type: String,
-    enum: ['info', 'warning', 'error', 'critical'],
-    default: 'info',
-    index: true
-  },
-
-  // Actor Information
-  actor: {
-    userId: {
-      type: mongoose.Schema.Types.Mixed,
-      ref: 'User',
-      required: true,
-      // Can be ObjectId for user actions, 'system' for system events, or 'anonymous' for unknown users
-      validate: {
-        validator: function(v) {
-          return mongoose.Types.ObjectId.isValid(v) || v === 'system' || v === 'anonymous';
-        },
-        message: 'userId must be either a valid ObjectId, "system", or "anonymous"'
-      }
-    },
-    email: String,
-    role: String,
-    ip: String,
-    userAgent: String,
-    deviceId: String
-  },
-
-  // Target Information
-  target: {
-    model: String,
-    documentId: mongoose.Schema.Types.ObjectId,
-    collection: String,
-    fields: [String],
-    previousState: mongoose.Schema.Types.Mixed,
-    newState: mongoose.Schema.Types.Mixed
-  },
-
-  // Action Details
+  
   action: {
     type: String,
+    required: true,
+    index: true,
     enum: [
-      'create',
-      'read',
-      'update',
-      'delete',
-      'login',
-      'logout',
-      'verify',
-      'approve',
-      'reject',
-      'suspend',
-      'restore',
-      'upload',
-      'download'
+      // User management actions
+      'USER_CREATE',
+      'USER_UPDATE',
+      'USER_DELETE',
+      'USER_STATUS_CHANGE',
+      'USER_ROLE_CHANGE',
+      'USER_VERIFICATION',
+      
+      // Job management actions
+      'JOB_STATUS_CHANGE',
+      'JOB_DELETE',
+      'JOB_REVIEW',
+      
+      // Profile management actions
+      'PROFILE_VERIFY',
+      'PROFILE_REJECT',
+      'PROFILE_SUSPEND',
+      
+      // Payment and financial actions
+      'PAYMENT_APPROVE',
+      'PAYMENT_REJECT',
+      'REFUND_ISSUE',
+      'WITHDRAWAL_APPROVE',
+      
+      // Dispute management actions
+      'DISPUTE_RESOLVE',
+      'DISPUTE_ESCALATE',
+      'DISPUTE_CLOSE',
+      
+      // System actions
+      'SYSTEM_CONFIG_UPDATE',
+      'FEATURE_TOGGLE',
+      'MAINTENANCE_MODE',
+      
+      // Security actions
+      'LOGIN_ATTEMPT',
+      'PASSWORD_RESET',
+      'ACCOUNT_LOCK',
+      'API_KEY_GENERATE',
+      
+      // Content management actions
+      'CONTENT_CREATE',
+      'CONTENT_UPDATE',
+      'CONTENT_DELETE',
+      'CONTENT_PUBLISH'
     ]
   },
+
+  targetType: {
+    type: String,
+    required: true,
+    index: true,
+    enum: [
+      'USER',
+      'JOB',
+      'PROFILE',
+      'PAYMENT',
+      'DISPUTE',
+      'SYSTEM',
+      'CONTENT',
+      'SECURITY'
+    ]
+  },
+
+  targetId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: false,
+    index: true
+  },
+
+  changes: {
+    type: mongoose.Schema.Types.Mixed,
+    required: false
+  },
+
+  reason: {
+    type: String,
+    required: false,
+    trim: true,
+    maxLength: 1000
+  },
+
   status: {
     type: String,
-    enum: ['success', 'failure', 'pending', 'cancelled'],
-    default: 'success'
-  },
-  description: String,
-
-  // Location Information
-  location: {
-    ip: String,
-    country: String,
-    city: String,
-    coordinates: {
-      latitude: Number,
-      longitude: Number
-    }
+    enum: ['SUCCESS', 'FAILURE', 'PENDING'],
+    default: 'SUCCESS',
+    index: true
   },
 
-  // Request Details
-  request: {
-    method: String,
-    url: String,
-    params: mongoose.Schema.Types.Mixed,
-    query: mongoose.Schema.Types.Mixed,
-    body: mongoose.Schema.Types.Mixed,
-    headers: mongoose.Schema.Types.Mixed
-  },
-
-  // Response Details
-  response: {
-    statusCode: Number,
-    body: mongoose.Schema.Types.Mixed,
-    headers: mongoose.Schema.Types.Mixed,
-    error: mongoose.Schema.Types.Mixed
-  },
-
-  // Performance Metrics
-  performance: {
-    duration: Number,
-    memoryUsage: Number,
-    cpuUsage: Number
-  },
-
-  // Metadata
   metadata: {
-    type: Map,
-    of: mongoose.Schema.Types.Mixed
-  },
-  tags: [String],
-
-  // Related Events
-  relatedEvents: [{
-    eventId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'AuditLog'
+    ipAddress: {
+      type: String,
+      required: true
     },
-    relationship: String
-  }],
-
-  // Error Information
-  error: {
-    code: String,
-    message: String,
-    stack: String,
+    userAgent: {
+      type: String,
+      required: true
+    },
+    timestamp: {
+      type: Date,
+      required: true,
+      default: Date.now
+    },
+    location: {
+      type: String,
+      required: false
+    },
     details: mongoose.Schema.Types.Mixed
+  },
+
+  severity: {
+    type: String,
+    enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+    default: 'LOW',
+    index: true
+  },
+  
+  isReviewed: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+
+  reviewedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false
+  },
+
+  reviewNotes: {
+    type: String,
+    required: false
   }
 }, {
   timestamps: true
@@ -154,218 +152,94 @@ const auditLogSchema = new mongoose.Schema({
 
 // Indexes
 auditLogSchema.index({ createdAt: 1 });
-auditLogSchema.index({ 'actor.userId': 1, createdAt: -1 });
-auditLogSchema.index({ event: 1, category: 1 });
-auditLogSchema.index({ 'target.documentId': 1 });
-auditLogSchema.index({ 'location.ip': 1 });
+auditLogSchema.index({ action: 1, targetType: 1 });
+auditLogSchema.index({ userId: 1, createdAt: -1 });
+auditLogSchema.index({ targetType: 1, targetId: 1 });
 
 // Methods
-auditLogSchema.statics = {
-  // Log user action
-  logUserAction: async function(data) {
-    try {
-      const auditLog = new this({
-        event: data.event,
-        category: this.determineCategory(data.event),
-        severity: data.severity || 'info',
-        actor: data.actor,
-        target: data.target,
-        action: data.action,
-        description: data.description,
-        metadata: data.metadata,
-        tags: data.tags
-      });
-
-      await auditLog.save();
-      return auditLog;
-    } catch (error) {
-      logger.error('Error logging user action:', error);
-      throw error;
-    }
-  },
-
-  // Log system event
-  logSystemEvent: async function(data) {
-    try {
-      const auditLog = new this({
-        event: data.event,
-        category: 'system',
-        severity: data.severity || 'info',
-        actor: {
-          userId: 'system',
-          role: 'system'
-        },
-        description: data.description,
-        metadata: data.metadata,
-        performance: data.performance
-      });
-
-      await auditLog.save();
-      return auditLog;
-    } catch (error) {
-      logger.error('Error logging system event:', error);
-      throw error;
-    }
-  },
-
-  // Log security event
-  logSecurityEvent: async function(data) {
-    try {
-      const auditLog = new this({
-        event: data.event,
-        category: 'security',
-        severity: data.severity || 'warning',
-        actor: data.actor,
-        location: data.location,
-        request: data.request,
-        description: data.description,
-        metadata: data.metadata
-      });
-
-      await auditLog.save();
-      return auditLog;
-    } catch (error) {
-      logger.error('Error logging security event:', error);
-      throw error;
-    }
-  },
-
-  // Get audit trail for entity
-  getAuditTrail: async function(entityId, options = {}) {
-    const query = {
-      'target.documentId': entityId
-    };
-
-    if (options.startDate) {
-      query.createdAt = { $gte: options.startDate };
-    }
-    if (options.endDate) {
-      query.createdAt = { ...query.createdAt, $lte: options.endDate };
-    }
-    if (options.category) {
-      query.category = options.category;
-    }
-
-    return this.find(query)
-      .sort({ createdAt: -1 })
-      .limit(options.limit || 100)
-      .populate('actor.userId', 'name email');
-  },
-
-  // Get user activity
-  getUserActivity: async function(userId, options = {}) {
-    const query = {
-      'actor.userId': userId
-    };
-
-    if (options.startDate) {
-      query.createdAt = { $gte: options.startDate };
-    }
-    if (options.endDate) {
-      query.createdAt = { ...query.createdAt, $lte: options.endDate };
-    }
-    if (options.category) {
-      query.category = options.category;
-    }
-
-    return this.find(query)
-      .sort({ createdAt: -1 })
-      .limit(options.limit || 100);
-  },
-
-  // Get security events
-  getSecurityEvents: async function(options = {}) {
-    const query = {
-      category: 'security'
-    };
-
-    if (options.severity) {
-      query.severity = options.severity;
-    }
-    if (options.ip) {
-      query['location.ip'] = options.ip;
-    }
-    if (options.startDate) {
-      query.createdAt = { $gte: options.startDate };
-    }
-    if (options.endDate) {
-      query.createdAt = { ...query.createdAt, $lte: options.endDate };
-    }
-
-    return this.find(query)
-      .sort({ createdAt: -1 })
-      .limit(options.limit || 100);
-  },
-
-  // Get activity statistics
-  getActivityStats: async function(options = {}) {
-    const matchStage = {};
-
-    if (options.startDate) {
-      matchStage.createdAt = { $gte: options.startDate };
-    }
-    if (options.endDate) {
-      matchStage.createdAt = { ...matchStage.createdAt, $lte: options.endDate };
-    }
-
-    return this.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: {
-            category: '$category',
-            action: '$action'
-          },
-          count: { $sum: 1 },
-          successCount: {
-            $sum: { $cond: [{ $eq: ['$status', 'success'] }, 1, 0] }
-          },
-          failureCount: {
-            $sum: { $cond: [{ $eq: ['$status', 'failure'] }, 1, 0] }
-          }
-        }
-      },
-      {
-        $group: {
-          _id: '$_id.category',
-          actions: {
-            $push: {
-              action: '$_id.action',
-              count: '$count',
-              successCount: '$successCount',
-              failureCount: '$failureCount'
-            }
-          },
-          totalCount: { $sum: '$count' }
-        }
-      }
-    ]);
-  },
-
-  // Helper method to determine category from event
-  determineCategory: function(event) {
-    const categoryMap = {
-      'user_': 'user',
-      'auth_': 'auth',
-      'job_': 'job',
-      'contract_': 'contract',
-      'payment_': 'payment',
-      'dispute_': 'dispute',
-      'review_': 'review',
-      'admin_': 'admin',
-      'system_': 'system',
-      'security_': 'security'
-    };
-
-    for (const [prefix, category] of Object.entries(categoryMap)) {
-      if (event.startsWith(prefix)) {
-        return category;
-      }
-    }
-
-    return 'system';
-  }
+auditLogSchema.methods.markAsReviewed = async function(reviewerId, notes) {
+  this.isReviewed = true;
+  this.reviewedBy = reviewerId;
+  this.reviewNotes = notes;
+  await this.save();
 };
 
-export const AuditLog = mongoose.model('AuditLog', auditLogSchema);
+// Virtual for formatted timestamp
+auditLogSchema.virtual('formattedTimestamp').get(function() {
+  return this.metadata.timestamp.toISOString();
+});
+
+// Ensure virtuals are included in JSON output
+auditLogSchema.set('toJSON', { virtuals: true });
+auditLogSchema.set('toObject', { virtuals: true });
+
+// Pre-save middleware for automatic severity assignment
+auditLogSchema.pre('save', function(next) {
+  // Set severity based on action type if not explicitly set
+  if (!this.severity) {
+    const criticalActions = [
+      'USER_DELETE',
+      'SYSTEM_CONFIG_UPDATE',
+      'MAINTENANCE_MODE',
+      'ACCOUNT_LOCK'
+    ];
+    
+    const highSeverityActions = [
+      'USER_ROLE_CHANGE',
+      'PROFILE_SUSPEND',
+      'PAYMENT_APPROVE',
+      'DISPUTE_RESOLVE'
+    ];
+
+    const mediumSeverityActions = [
+      'USER_STATUS_CHANGE',
+      'JOB_STATUS_CHANGE',
+      'PROFILE_VERIFY',
+      'CONTENT_PUBLISH'
+    ];
+
+    if (criticalActions.includes(this.action)) {
+      this.severity = 'CRITICAL';
+    } else if (highSeverityActions.includes(this.action)) {
+      this.severity = 'HIGH';
+    } else if (mediumSeverityActions.includes(this.action)) {
+      this.severity = 'MEDIUM';
+    } else {
+      this.severity = 'LOW';
+    }
+  }
+  next();
+});
+
+// Static method for getting activity summary
+auditLogSchema.statics.getActivitySummary = async function(startDate, endDate) {
+  return this.aggregate([
+    {
+      $match: {
+        'metadata.timestamp': {
+          $gte: startDate,
+          $lte: endDate
+        }
+      }
+    },
+    {
+      $group: {
+        _id: {
+          action: '$action',
+          targetType: '$targetType',
+          severity: '$severity'
+        },
+        count: { $sum: 1 }
+      }
+    },
+    {
+      $sort: {
+        'count': -1
+      }
+    }
+  ]);
+};
+
+const AuditLog = mongoose.model('AuditLog', auditLogSchema);
+
 export default AuditLog;

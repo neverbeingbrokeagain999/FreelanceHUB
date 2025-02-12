@@ -1,75 +1,94 @@
 import Chat from '../models/Chat.js';
-import multer from 'multer';
-import path from 'path';
-import { io } from '../index.js';
+import DirectMessage from '../models/DirectMessage.js';
+import { errorResponse } from '../utils/errorHandler.js';
+import logger from '../config/logger.js';
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({ storage: storage });
-
-export const sendMessage = async (req, res) => {
+export const getConversations = async (req, res) => {
   try {
-    const { message, receiver, jobId } = req.body;
-    const sender = req.user.userId;
-    let files = [];
+    const conversations = await Chat.find({
+      participants: req.user._id
+    })
+    .populate('participants', 'name avatar')
+    .populate('lastMessage')
+    .sort('-updatedAt');
 
-    if (req.files && req.files.length > 0) {
-      files = req.files.map(file => `/uploads/${file.filename}`);
-    }
-
-    const chatMessage = new Chat({
-      sender,
-      receiver,
-      message,
-      job: jobId,
-      files
-    });
-
-    await chatMessage.save();
-
-    // Emit a notification event
-    io.emit('newMessage', {
-      message: chatMessage,
-      jobId,
-      receiver
-    });
-
-    res.status(201).json({ message: 'Message sent successfully', chatMessage });
+    res.json(conversations);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    logger.error('Get conversations error:', error);
+    return errorResponse(res, 500, 'Error fetching conversations');
   }
 };
 
 export const getMessages = async (req, res) => {
   try {
-    const jobId = req.params.jobId;
-    const messages = await Chat.find({ job: jobId }).populate('sender', 'name');
+    const { conversationId } = req.params;
+    const messages = await DirectMessage.find({
+      chat: conversationId
+    })
+    .populate('sender', 'name avatar')
+    .sort('-createdAt');
+
     res.json(messages);
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    logger.error('Get messages error:', error);
+    return errorResponse(res, 500, 'Error fetching messages');
   }
 };
 
-export const markMessageAsRead = async (req, res) => {
+export const sendMessage = async (req, res) => {
   try {
-    const { messageIds } = req.body;
-    const userId = req.user.userId;
+    const { recipientId, content } = req.body;
 
-    await Chat.updateMany(
-      { _id: { $in: messageIds }, receiver: userId, isRead: false },
-      { isRead: true, readAt: Date.now() }
+    // Find existing chat or create new one
+    let chat = await Chat.findOne({
+      participants: { $all: [req.user._id, recipientId] }
+    });
+
+    if (!chat) {
+      chat = await Chat.create({
+        participants: [req.user._id, recipientId]
+      });
+    }
+
+    // Create message
+    const message = await DirectMessage.create({
+      chat: chat._id,
+      sender: req.user._id,
+      content
+    });
+
+    // Update chat's last message
+    chat.lastMessage = message._id;
+    await chat.save();
+
+    // Populate sender details
+    await message.populate('sender', 'name avatar');
+
+    res.status(201).json(message);
+  } catch (error) {
+    logger.error('Send message error:', error);
+    return errorResponse(res, 500, 'Error sending message');
+  }
+};
+
+export const markAsRead = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    
+    await DirectMessage.updateMany(
+      {
+        chat: conversationId,
+        sender: { $ne: req.user._id },
+        read: false
+      },
+      {
+        $set: { read: true }
+      }
     );
 
     res.json({ message: 'Messages marked as read' });
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    logger.error('Mark as read error:', error);
+    return errorResponse(res, 500, 'Error marking messages as read');
   }
 };

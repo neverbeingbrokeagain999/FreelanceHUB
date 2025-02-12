@@ -1,398 +1,382 @@
 import User from '../models/User.js';
 import Job from '../models/Job.js';
-import Transaction from '../models/Transaction.js';
 import Dispute from '../models/Dispute.js';
 import AuditLog from '../models/AuditLog.js';
-import Notification from '../models/Notification.js';
-import logger from '../config/logger.js';
+import Profile from '../models/Profile.js';
 import { errorResponse } from '../utils/errorHandler.js';
+import logger from '../config/logger.js';
+import AuditService from '../services/auditService.js';
 
-// Dashboard Stats
-export const getDashboardStats = async (req, res) => {
+// Dashboard Analytics
+export const getDashboardAnalytics = async (req, res) => {
   try {
-    const [users, jobs, transactions, disputes] = await Promise.all([
-      User.countDocuments(),
-      Job.countDocuments(),
-      Transaction.countDocuments(),
-      Dispute.countDocuments({ status: 'opened' })
+    // Get key metrics
+    const [
+      totalUsers,
+      activeJobs,
+      openDisputes,
+      pendingVerifications
+    ] = await Promise.all([
+      User.countDocuments({ isActive: true }),
+      Job.countDocuments({ status: 'active' }),
+      Dispute.countDocuments({ status: 'open' }),
+      Profile.countDocuments({ verificationStatus: 'pending' })
     ]);
 
-    // Group users by role
-    const usersByRole = await User.aggregate([
-      { $group: { _id: '$role', count: { $sum: 1 } } }
-    ]);
-
-    const roleStats = {};
-    usersByRole.forEach(stat => {
-      roleStats[stat._id] = stat.count;
-    });
-
-    // Get job stats
-    const jobsByStatus = await Job.aggregate([
-      { $group: { _id: '$status', count: { $sum: 1 } } }
-    ]);
-
-    const jobStatusStats = {};
-    jobsByStatus.forEach(stat => {
-      jobStatusStats[stat._id] = stat.count;
-    });
-
-    // Get financial stats
-    const financialStats = await Transaction.aggregate([
-      { 
-        $group: {
-          _id: null,
-          totalAmount: { $sum: '$amount.value' },
-          avgAmount: { $avg: '$amount.value' }
-        }
-      }
-    ]).then(result => result[0] || { totalAmount: 0, avgAmount: 0 });
+    // Get recent audit logs
+    const recentActivity = await AuditService.getRecentActivities(5);
 
     res.json({
-      userStats: {
-        total: users,
-        ...roleStats
-      },
-      jobStats: {
-        total: jobs,
-        ...jobStatusStats
-      },
-      financialStats: {
-        totalTransactions: transactions,
-        totalAmount: financialStats.totalAmount,
-        averageAmount: Math.round(financialStats.avgAmount * 100) / 100
-      },
-      disputeStats: {
-        openDisputes: disputes
+      success: true,
+      data: {
+        metrics: {
+          totalUsers,
+          activeJobs,
+          openDisputes,
+          pendingVerifications
+        },
+        recentActivity
       }
     });
   } catch (error) {
-    logger.error('Get dashboard stats error:', error);
-    return errorResponse(res, 500, 'Error getting dashboard stats');
+    logger.error('Dashboard analytics error:', error);
+    return errorResponse(res, 500, error.message);
   }
 };
 
 // User Management
-export const getUsers = async (req, res) => {
+export const listUsers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    
+    const { page = 1, limit = 10, search, role, status, sortBy, sortOrder } = req.query;
+
     const query = {};
-    if (req.query.role) {
-      query.role = req.query.role;
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
     }
+    if (role) query.roles = role;
+    if (status) query.isActive = status === 'active';
 
-    const [users, total] = await Promise.all([
-      User.find(query)
-        .select('-password')
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .sort('-createdAt'),
-      User.countDocuments(query)
-    ]);
+    const users = await User.find(query)
+      .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select('-password');
+
+    const total = await User.countDocuments(query);
 
     res.json({
-      data: users,
-      pagination: {
-        total,
-        pages: Math.ceil(total / limit),
-        page
+      success: true,
+      data: {
+        users,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / limit)
+        }
       }
     });
   } catch (error) {
-    logger.error('Get users error:', error);
-    return errorResponse(res, 500, 'Error getting users');
+    logger.error('List users error:', error);
+    return errorResponse(res, 500, error.message);
   }
 };
 
-export const getUserById = async (req, res) => {
+export const updateUserStatus = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('-password');
-    if (!user) {
-      return errorResponse(res, 404, 'User not found');
-    }
-    res.json({ user });
-  } catch (error) {
-    logger.error('Get user error:', error);
-    return errorResponse(res, 500, 'Error getting user');
-  }
-};
+    const { userId } = req.params;
+    const { status, reason } = req.body;
 
-export const updateUser = async (req, res) => {
-  try {
-    // Validate role if being updated
-    if (req.body.role && !['admin', 'client', 'freelancer'].includes(req.body.role)) {
-      return errorResponse(res, 400, 'Invalid role specified');
-    }
-
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { $set: req.body },
-      { new: true, runValidators: true }
-    ).select('-password');
-
+    const user = await User.findById(userId);
     if (!user) {
       return errorResponse(res, 404, 'User not found');
     }
 
-    await AuditLog.logUserAction({
-      event: 'user_update',
-      action: 'update',
-      actor: {
-        userId: req.user._id,
-        email: req.user.email,
-        role: req.user.role
-      },
-      target: {
-        model: 'User',
-        documentId: req.params.id,
-        previousState: user.toObject(),
-        newState: req.body
-      },
-      description: `User ${req.params.id} updated by admin ${req.user._id}`
-    });
+    user.isActive = status === 'active';
+    await user.save();
 
-    res.json({ user });
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          roles: user.roles,
+          isActive: user.isActive
+        }
+      }
+    });
   } catch (error) {
-    logger.error('Update user error:', error);
-    return errorResponse(res, 500, 'Error updating user');
+    logger.error('Update user status error:', error);
+    return errorResponse(res, 500, error.message);
   }
 };
 
-export const deleteUser = async (req, res) => {
+export const updateUserRoles = async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
+    const { userId } = req.params;
+    const { roles, reason } = req.body;
+
+    const user = await User.findById(userId);
     if (!user) {
       return errorResponse(res, 404, 'User not found');
     }
 
-    await AuditLog.logUserAction({
-      event: 'user_delete',
-      action: 'delete',
-      actor: {
-        userId: req.user._id,
-        email: req.user.email,
-        role: req.user.role
-      },
-      target: {
-        model: 'User',
-        documentId: req.params.id,
-        previousState: user.toObject()
-      },
-      description: `User ${req.params.id} deleted by admin ${req.user._id}`
-    });
-
-    res.json({ message: 'User deleted successfully' });
-  } catch (error) {
-    logger.error('Delete user error:', error);
-    return errorResponse(res, 500, 'Error deleting user');
-  }
-};
-
-// Transaction Management
-export const getTransactions = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    
-    const [transactions, total] = await Promise.all([
-      Transaction.find()
-        .populate('sender.user recipient.user', 'name email')
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .sort('-createdAt'),
-      Transaction.countDocuments()
-    ]);
-
-    res.json({
-      data: transactions,
-      pagination: {
-        total,
-        pages: Math.ceil(total / limit),
-        page
+    // Prevent removing all admin roles if user is the last admin
+    if (user.roles.includes('admin') && !roles.includes('admin')) {
+      const adminCount = await User.countDocuments({ roles: 'admin' });
+      if (adminCount <= 1) {
+        return errorResponse(res, 400, 'Cannot remove the last admin user');
       }
-    });
-  } catch (error) {
-    logger.error('Get transactions error:', error);
-    return errorResponse(res, 500, 'Error getting transactions');
-  }
-};
-
-// Dispute Management
-export const getDisputes = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    
-    const [disputes, total] = await Promise.all([
-      Dispute.find()
-        .populate('initiator.user respondent.user', 'name email')
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .sort('-createdAt'),
-      Dispute.countDocuments()
-    ]);
-
-    res.json({
-      data: disputes,
-      pagination: {
-        total,
-        pages: Math.ceil(total / limit),
-        page
-      }
-    });
-  } catch (error) {
-    logger.error('Get disputes error:', error);
-    return errorResponse(res, 500, 'Error getting disputes');
-  }
-};
-
-export const resolveDispute = async (req, res) => {
-  try {
-    const dispute = await Dispute.findByIdAndUpdate(
-      req.params.id,
-      { 
-        $set: { 
-          status: 'resolved',
-          'resolution.outcome': 'resolved_mutually',
-          'resolution.description': req.body.resolution,
-          'resolution.resolvedBy': req.user._id,
-          'resolution.resolvedAt': new Date()
-        }
-      },
-      { new: true }
-    ).populate('initiator.user respondent.user', 'name email');
-
-    if (!dispute) {
-      return errorResponse(res, 404, 'Dispute not found');
     }
 
-    // Create notification for involved parties
-    await Notification.insertMany([
-      {
-        recipient: dispute.initiator.user,
-        title: 'Dispute Resolved',
-        message: `Your dispute has been resolved: ${req.body.resolution}`,
-        type: 'dispute',
-        category: 'info',
-        delivery: {
-          channels: [{
-            type: 'in_app'
-          }]
-        }
-      },
-      {
-        recipient: dispute.respondent.user,
-        title: 'Dispute Resolved',
-        message: `Your dispute has been resolved: ${req.body.resolution}`,
-        type: 'dispute',
-        category: 'info',
-        delivery: {
-          channels: [{
-            type: 'in_app'
-          }]
-        }
-      }
-    ]);
-
-    await AuditLog.logUserAction({
-      event: 'dispute_resolve',
-      action: 'update',
-      category: 'dispute',
-      actor: {
-        userId: req.user._id,
-        email: req.user.email,
-        role: req.user.role
-      },
-      target: {
-        model: 'Dispute',
-        documentId: req.params.id,
-        previousState: dispute.toObject()
-      },
-      description: `Dispute ${req.params.id} resolved by admin ${req.user._id}`
-    });
-
-    res.json(dispute);
-  } catch (error) {
-    logger.error('Resolve dispute error:', error);
-    return errorResponse(res, 500, 'Error resolving dispute');
-  }
-};
-
-// Notification Management
-export const getNotifications = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    
-    const [notifications, total] = await Promise.all([
-      Notification.find()
-        .populate('recipient', 'name email')
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .sort('-createdAt'),
-      Notification.countDocuments()
-    ]);
+    user.roles = roles;
+    await user.save();
 
     res.json({
-      data: notifications,
-      pagination: {
-        total,
-        pages: Math.ceil(total / limit),
-        page
+      success: true,
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          roles: user.roles
+        }
       }
     });
   } catch (error) {
-    logger.error('Get notifications error:', error);
-    return errorResponse(res, 500, 'Error getting notifications');
+    logger.error('Update user roles error:', error);
+    return errorResponse(res, 500, error.message);
   }
 };
 
-export const markNotificationRead = async (req, res) => {
+// Audit Log Management
+export const listAuditLogs = async (req, res) => {
   try {
-    const notification = await Notification.findByIdAndUpdate(
-      req.params.id,
-      { $set: { 'status.isRead': true, 'status.readAt': new Date() } },
-      { new: true }
+    const { page, limit, userId, action, startDate, endDate, sortOrder } = req.query;
+
+    const filters = {};
+    if (userId) filters.userId = userId;
+    if (action) filters.action = action;
+    if (startDate || endDate) {
+      filters.startDate = startDate;
+      filters.endDate = endDate;
+    }
+
+    const options = {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      sortOrder
+    };
+
+    const result = await AuditService.getAuditLogs(filters, options);
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    logger.error('List audit logs error:', error);
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+export const reviewAuditLog = async (req, res) => {
+  try {
+    const { logId } = req.params;
+    const { notes } = req.body;
+
+    const log = await AuditLog.findById(logId);
+    if (!log) {
+      return errorResponse(res, 404, 'Audit log not found');
+    }
+
+    await log.markAsReviewed(req.user.id, notes);
+
+    res.json({
+      success: true,
+      message: 'Audit log marked as reviewed'
+    });
+  } catch (error) {
+    logger.error('Review audit log error:', error);
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+// System Configuration
+export const getSystemConfig = async (req, res) => {
+  try {
+    const config = await SystemConfig.findOne();
+    res.json({
+      success: true,
+      data: { config }
+    });
+  } catch (error) {
+    logger.error('Get system config error:', error);
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+export const updateSystemConfig = async (req, res) => {
+  try {
+    const { settings } = req.body;
+
+    const config = await SystemConfig.findOneAndUpdate(
+      {},
+      { $set: settings },
+      { new: true, upsert: true }
     );
 
-    if (!notification) {
-      return errorResponse(res, 404, 'Notification not found');
-    }
-
-    res.json(notification);
+    res.json({
+      success: true,
+      data: { config }
+    });
   } catch (error) {
-    logger.error('Mark notification read error:', error);
-    return errorResponse(res, 500, 'Error updating notification');
+    logger.error('Update system config error:', error);
+    return errorResponse(res, 500, error.message);
   }
 };
 
-// Audit Logs
-export const getAuditLogs = async (req, res) => {
+// Reports
+export const getRevenueReport = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    
-    const [logs, total] = await Promise.all([
-      AuditLog.find()
-        .populate('actor.userId', 'name email')
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .sort('-createdAt'),
-      AuditLog.countDocuments()
-    ]);
-
+    const { startDate, endDate, interval } = req.query;
+    // Implementation for revenue report generation
     res.json({
-      data: logs,
-      pagination: {
-        total,
-        pages: Math.ceil(total / limit),
-        page
+      success: true,
+      data: {
+        // Report data
       }
     });
   } catch (error) {
-    logger.error('Get audit logs error:', error);
-    return errorResponse(res, 500, 'Error getting audit logs');
+    logger.error('Revenue report error:', error);
+    return errorResponse(res, 500, error.message);
   }
+};
+
+export const getUserActivityReport = async (req, res) => {
+  try {
+    const { startDate, endDate, userType } = req.query;
+    const summary = await AuditService.getUserActivitySummary(startDate, endDate);
+    
+    res.json({
+      success: true,
+      data: { summary }
+    });
+  } catch (error) {
+    logger.error('User activity report error:', error);
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+// Profile Verification
+export const listPendingVerifications = async (req, res) => {
+  try {
+    const { status = 'pending', page = 1, limit = 10 } = req.query;
+    
+    const profiles = await Profile.find({ verificationStatus: status })
+      .populate('user', 'name email')
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+
+    const total = await Profile.countDocuments({ verificationStatus: status });
+
+    res.json({
+      success: true,
+      data: {
+        profiles: profiles.map(profile => ({
+          id: profile._id,
+          name: profile.user.name,
+          email: profile.user.email,
+          role: profile.role,
+          location: profile.location,
+          skills: profile.skills,
+          bio: profile.bio,
+          documents: profile.documents,
+          createdAt: profile.createdAt,
+          avatar: profile.avatar
+        })),
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('List pending verifications error:', error);
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+export const approveVerification = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const profile = await Profile.findOne({ user: userId });
+    if (!profile) {
+      return errorResponse(res, 404, 'Profile not found');
+    }
+
+    profile.verificationStatus = 'approved';
+    profile.verifiedAt = new Date();
+    profile.verifiedBy = req.user.id;
+    await profile.save();
+
+    res.json({
+      success: true,
+      message: 'Profile verification approved'
+    });
+  } catch (error) {
+    logger.error('Approve verification error:', error);
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+export const rejectVerification = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { reason } = req.body;
+
+    const profile = await Profile.findOne({ user: userId });
+    if (!profile) {
+      return errorResponse(res, 404, 'Profile not found');
+    }
+
+    profile.verificationStatus = 'rejected';
+    profile.rejectionReason = reason;
+    profile.rejectedAt = new Date();
+    profile.rejectedBy = req.user.id;
+    await profile.save();
+
+    res.json({
+      success: true,
+      message: 'Profile verification rejected'
+    });
+  } catch (error) {
+    logger.error('Reject verification error:', error);
+    return errorResponse(res, 500, error.message);
+  }
+};
+
+export default {
+  getDashboardAnalytics,
+  listUsers,
+  updateUserStatus,
+  updateUserRoles,
+  listAuditLogs,
+  reviewAuditLog,
+  getSystemConfig,
+  updateSystemConfig,
+  getRevenueReport,
+  getUserActivityReport,
+  listPendingVerifications,
+  approveVerification,
+  rejectVerification
 };

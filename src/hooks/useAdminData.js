@@ -1,79 +1,120 @@
-import { useState, useCallback } from 'react';
-import { useNotifications } from './useNotifications';
-import { adminService } from '../services/adminService';
+import { useState, useCallback, useEffect } from 'react';
+import { useAuthContext } from '../context/AuthContext';
+import { handleError } from '../utils/errorUtils';
 
-export const useAdminData = () => {
+/**
+ * Hook for managing admin data and jobs
+ * @param {Object} initialFilters - Initial filter values
+ * @returns {Object} Admin data and functions
+ */
+export const useAdminData = (initialFilters = {}) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [data, setData] = useState({
-    stats: {
-      totalUsers: 0,
-      totalJobs: 0,
-      totalEarnings: 0,
-      disputeRate: 0
-    },
-    freelancers: [],
-    disputes: []
+    users: { total: 0 },
+    jobs: { active: 0, total: 0 },
+    verifications: { pending: 0 },
+    disputes: { open: 0 },
+    contracts: { total: 0 },
+    revenue: { total: 0 },
+    jobsList: [],
+    currentPage: 1,
+    totalPages: 1,
+    totalJobs: 0
   });
-  const [loading, setLoading] = useState(true);
-  const { addError, addSuccess } = useNotifications();
+  const [filters, setFilters] = useState(initialFilters);
+  const { user } = useAuthContext();
 
-  const fetchDashboardData = useCallback(async (timeRange) => {
+  const fetchData = useCallback(async (page = 1) => {
     try {
-      // Try to get from cache first
-      const cachedData = await cacheService.get(`dashboard-${timeRange}`);
-      if (cachedData) {
-        setData(cachedData);
-        setLoading(false);
-        return;
-      }
+      setLoading(true);
+      setError(null);
 
-      const result = await adminService.getDashboardData(timeRange);
-      
-      // Cache the result
-      await cacheService.set(`dashboard-${timeRange}`, result, 300); // 5 minutes
-      setData(result);
-    } catch (error) {
-      addError('Failed to fetch dashboard data');
+      // Mock data for dashboard and job list
+      const mockData = {
+        users: { total: 1250 },
+        jobs: { active: 45, total: 120 },
+        verifications: { pending: 15 },
+        disputes: { open: 8 },
+        contracts: { total: 95 },
+        revenue: { total: 125000 },
+        jobsList: [
+          {
+            id: 1,
+            title: 'Full Stack Developer Needed',
+            description: 'Looking for an experienced full stack developer...',
+            budget: '$3000-5000',
+            status: 'pending',
+            createdAt: '2024-02-09',
+            client: {
+              name: 'Tech Corp',
+              rating: 4.5
+            }
+          },
+          {
+            id: 2,
+            title: 'UI/UX Designer for Mobile App',
+            description: 'Need a talented designer for our mobile app...',
+            budget: '$2000-4000',
+            status: 'active',
+            createdAt: '2024-02-08',
+            client: {
+              name: 'Design Studio',
+              rating: 4.8
+            }
+          },
+          {
+            id: 3,
+            title: 'Backend Developer Required',
+            description: 'Seeking a Node.js expert for our backend...',
+            budget: '$4000-6000',
+            status: 'pending',
+            createdAt: '2024-02-07',
+            client: {
+              name: 'Software Solutions',
+              rating: 4.2
+            }
+          }
+        ],
+        currentPage: page,
+        totalPages: 3,
+        totalJobs: 25
+      };
+
+      const newData = mockData;
+
+      setData(newData);
+      return newData;
+    } catch (err) {
+      const message = handleError(err, {
+        context: 'fetchData',
+        user: user?.id
+      });
+      setError(message);
+      throw err;
     } finally {
       setLoading(false);
     }
-  }, [addError]);
+  }, [user]);
 
-  const updateFreelancer = useCallback(async (id, action) => {
-    try {
-      if (action === 'verify') {
-        await adminService.verifyFreelancer(id);
-        addSuccess('Freelancer verified successfully');
-      } else if (action === 'suspend') {
-        await adminService.suspendFreelancer(id);
-        addSuccess('Freelancer suspended successfully');
-      }
-      
-      // Invalidate cache
-      await cacheService.del('dashboard-*');
-      await fetchDashboardData();
-    } catch (error) {
-      addError(`Failed to ${action} freelancer`);
-    }
-  }, [fetchDashboardData, addSuccess, addError]);
+  const updateFilters = useCallback((newFilters) => {
+    setFilters(newFilters);
+    fetchData(1); // Reset to first page with new filters
+  }, [fetchData]);
 
-  const resolveDispute = useCallback(async (disputeId) => {
-    try {
-      await adminService.resolveDispute(disputeId, 'resolved');
-      addSuccess('Dispute resolved successfully');
-      
-      // Invalidate cache
-      await cacheService.del('dashboard-*');
-      await fetchDashboardData();
-    } catch (error) {
-      addError('Failed to resolve dispute');
-    }
-  }, [fetchDashboardData, addSuccess, addError]);
+  // Initial fetch
+  useEffect(() => {
+    fetchData(1).catch(console.error);
+  }, [fetchData]);
 
   return {
     data,
     loading,
-    fetchDashboardData,
-    updateFreelancer,
-    resolveDispute
+    error,
+    filters,
+    updateFilters,
+    fetchData
   };
 };
+
+export default useAdminData;

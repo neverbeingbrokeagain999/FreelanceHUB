@@ -1,6 +1,6 @@
 import logger from '../config/logger.js';
-import { Profile } from '../models/Profile.js';
-import { User } from '../models/User.js';
+import Profile from '../models/Profile.js';
+import User from '../models/User.js';
 import { errorResponse } from '../utils/errorHandler.js';
 
 const validateProfileFields = (data) => {

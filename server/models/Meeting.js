@@ -1,4 +1,5 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
+const { MEETING_ROLES } = require('../config/webrtc');
 
 const participantSchema = new mongoose.Schema({
   user: {
@@ -8,14 +9,16 @@ const participantSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['host', 'participant'],
-    default: 'participant'
+    enum: Object.values(MEETING_ROLES),
+    default: MEETING_ROLES.PARTICIPANT
   },
   joinedAt: {
     type: Date,
     default: Date.now
   },
-  leftAt: Date,
+  leftAt: {
+    type: Date
+  },
   deviceInfo: {
     browser: String,
     os: String,
@@ -23,25 +26,53 @@ const participantSchema = new mongoose.Schema({
   },
   connectionInfo: {
     ip: String,
-    quality: String,
-    networkType: String
+    country: String,
+    region: String
+  },
+  media: {
+    video: {
+      type: Boolean,
+      default: true
+    },
+    audio: {
+      type: Boolean,
+      default: true
+    },
+    screen: {
+      type: Boolean,
+      default: false
+    }
+  },
+  networkStats: {
+    bitrate: Number,
+    packetsLost: Number,
+    roundTripTime: Number,
+    timestamp: Date
   }
 });
 
 const recordingSchema = new mongoose.Schema({
-  url: {
-    type: String,
+  startTime: {
+    type: Date,
     required: true
   },
-  startTime: Date,
   endTime: Date,
   size: Number,
-  format: String,
-  duration: Number,
+  format: {
+    type: String,
+    enum: ['webm', 'mp4'],
+    default: 'webm'
+  },
   status: {
     type: String,
-    enum: ['processing', 'available', 'failed'],
-    default: 'processing'
+    enum: ['recording', 'processing', 'completed', 'failed'],
+    default: 'recording'
+  },
+  url: String,
+  recordedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   }
 });
 
@@ -53,7 +84,8 @@ const chatMessageSchema = new mongoose.Schema({
   },
   content: {
     type: String,
-    required: true
+    required: true,
+    maxlength: 1000
   },
   timestamp: {
     type: Date,
@@ -64,155 +96,166 @@ const chatMessageSchema = new mongoose.Schema({
     enum: ['text', 'file', 'system'],
     default: 'text'
   },
-  file: {
-    url: String,
+  visibility: {
+    type: String,
+    enum: ['everyone', 'hosts', 'private'],
+    default: 'everyone'
+  },
+  recipients: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  fileInfo: {
     name: String,
     size: Number,
-    type: String
+    type: String,
+    url: String
   }
-});
-
-const screenShareSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  startTime: {
-    type: Date,
-    default: Date.now
-  },
-  endTime: Date,
-  duration: Number
 });
 
 const meetingSchema = new mongoose.Schema({
   title: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
+    maxlength: 200
   },
-  job: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Job'
+  description: {
+    type: String,
+    trim: true,
+    maxlength: 1000
   },
   host: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
-  meetingId: {
-    type: String,
-    unique: true,
-    required: true
-  },
-  password: String,
-  startTime: {
-    type: Date,
-    required: true
-  },
-  endTime: Date,
-  duration: Number,
-  status: {
-    type: String,
-    enum: ['scheduled', 'active', 'completed', 'cancelled'],
-    default: 'scheduled'
-  },
   type: {
     type: String,
-    enum: ['instant', 'scheduled', 'recurring'],
+    enum: ['instant', 'scheduled', 'recurring', 'permanent'],
     default: 'instant'
   },
-  participants: [participantSchema],
-  maxParticipants: {
-    type: Number,
-    default: 10
+  status: {
+    type: String,
+    enum: ['scheduled', 'live', 'ended', 'cancelled'],
+    default: 'scheduled'
   },
-  settings: {
-    audio: {
-      type: Boolean,
-      default: true
-    },
-    video: {
-      type: Boolean,
-      default: true
-    },
-    screenShare: {
-      type: Boolean,
-      default: true
-    },
-    chat: {
-      type: Boolean,
-      default: true
-    },
-    recording: {
-      type: Boolean,
-      default: false
-    },
-    waitingRoom: {
-      type: Boolean,
-      default: false
-    },
-    muteOnEntry: {
-      type: Boolean,
-      default: true
+  schedule: {
+    startTime: Date,
+    endTime: Date,
+    recurrence: {
+      frequency: {
+        type: String,
+        enum: ['daily', 'weekly', 'monthly']
+      },
+      interval: Number, // e.g., every 2 weeks
+      daysOfWeek: [Number], // 0-6 for Sunday-Saturday
+      endDate: Date
     }
   },
+  settings: {
+    maxParticipants: {
+      type: Number,
+      default: 16,
+      max: 50
+    },
+    features: {
+      recording: {
+        type: Boolean,
+        default: true
+      },
+      chat: {
+        type: Boolean,
+        default: true
+      },
+      screenSharing: {
+        type: Boolean,
+        default: true
+      },
+      whiteboard: {
+        type: Boolean,
+        default: true
+      }
+    },
+    security: {
+      waitingRoom: {
+        type: Boolean,
+        default: true
+      },
+      requireAuthentication: {
+        type: Boolean,
+        default: true
+      },
+      password: String,
+      encryption: {
+        type: Boolean,
+        default: true
+      }
+    },
+    quality: {
+      video: {
+        type: String,
+        enum: ['low', 'medium', 'high'],
+        default: 'medium'
+      },
+      audio: {
+        type: Boolean,
+        default: true
+      }
+    }
+  },
+  participants: [participantSchema],
   recordings: [recordingSchema],
   chat: [chatMessageSchema],
-  screenShares: [screenShareSchema],
-  metadata: {
-    agenda: String,
-    notes: String,
-    tags: [String]
+  statistics: {
+    peakParticipants: {
+      type: Number,
+      default: 0
+    },
+    totalDuration: {
+      type: Number,
+      default: 0
+    },
+    averageParticipants: {
+      type: Number,
+      default: 0
+    },
+    networkQuality: {
+      type: Number,
+      min: 1,
+      max: 5,
+      default: 5
+    }
   }
 }, {
   timestamps: true
 });
 
-// Indexes for better query performance
-meetingSchema.index({ host: 1, startTime: -1 });
-meetingSchema.index({ meetingId: 1 }, { unique: true });
-meetingSchema.index({ status: 1 });
-meetingSchema.index({ 'participants.user': 1 });
+// Indexes
+meetingSchema.index({ host: 1, status: 1 });
+meetingSchema.index({ 'schedule.startTime': 1 });
+meetingSchema.index({ 'participants.user': 1, status: 1 });
+meetingSchema.index({ title: 'text', description: 'text' });
 
-// Virtual for checking if meeting is active
-meetingSchema.virtual('isActive').get(function() {
-  return this.status === 'active';
-});
-
-// Virtual for calculating real-time duration
-meetingSchema.virtual('currentDuration').get(function() {
-  if (!this.startTime) return 0;
-  const end = this.endTime || new Date();
-  return (end - this.startTime) / 1000; // in seconds
-});
-
-// Method to add participant
-meetingSchema.methods.addParticipant = async function(userId, deviceInfo) {
-  if (this.participants.length >= this.maxParticipants) {
-    throw new Error('Meeting has reached maximum participants limit');
+// Methods
+meetingSchema.methods.addParticipant = async function(userData) {
+  if (this.participants.length >= this.settings.maxParticipants) {
+    throw new Error('Meeting is at maximum capacity');
   }
-
+  
   const existingParticipant = this.participants.find(
-    p => p.user.toString() === userId.toString() && !p.leftAt
+    p => p.user.toString() === userData.user.toString()
   );
 
-  if (existingParticipant) {
+  if (existingParticipant && !existingParticipant.leftAt) {
     throw new Error('User is already in the meeting');
   }
 
-  this.participants.push({
-    user: userId,
-    role: this.host.toString() === userId.toString() ? 'host' : 'participant',
-    deviceInfo
-  });
-
+  this.participants.push(userData);
   await this.save();
   return this;
 };
 
-// Method to remove participant
 meetingSchema.methods.removeParticipant = async function(userId) {
   const participant = this.participants.find(
     p => p.user.toString() === userId.toString() && !p.leftAt
@@ -226,23 +269,4 @@ meetingSchema.methods.removeParticipant = async function(userId) {
   return this;
 };
 
-// Method to end meeting
-meetingSchema.methods.endMeeting = async function() {
-  this.status = 'completed';
-  this.endTime = new Date();
-  this.duration = this.currentDuration;
-  
-  // Set leftAt for any remaining participants
-  this.participants.forEach(p => {
-    if (!p.leftAt) {
-      p.leftAt = new Date();
-    }
-  });
-
-  await this.save();
-  return this;
-};
-
-const Meeting = mongoose.model('Meeting', meetingSchema);
-
-export default Meeting;
+module.exports = mongoose.model('Meeting', meetingSchema);

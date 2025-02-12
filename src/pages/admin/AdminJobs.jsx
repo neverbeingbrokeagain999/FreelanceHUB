@@ -1,187 +1,145 @@
-import React, { useState, useEffect } from 'react';
-import { useNotifications } from '../../hooks/useNotifications';
+import React, { useState, useCallback } from 'react';
+import { toast } from 'react-toastify';
+import useAdminData from '../../hooks/useAdminData';
+import useAdminAuth from '../../hooks/useAdminAuth';
+import JobFilters from '../../components/admin/JobFilters';
+import JobListItem from '../../components/admin/JobListItem';
+import JobActionModal from '../../components/admin/JobActionModal';
+import Pagination from '../../components/common/Pagination';
+import LoadingSpinner from '../../components/LoadingSpinner';
 
-export default function AdminJobs() {
-  const { addSuccess, addError } = useNotifications();
-  const [loading, setLoading] = useState(true);
-  const [jobs, setJobs] = useState([]);
-  const [filters, setFilters] = useState({
-    status: 'all',
-    compliance: 'all',
-    category: 'all'
-  });
+const initialFilters = {
+  status: 'all',
+  type: 'all',
+  search: '',
+  sort: 'created_at:desc',
+  minBudget: '',
+  maxBudget: '',
+  dateFrom: '',
+  dateTo: ''
+};
 
-  useEffect(() => {
-    fetchJobs();
-  }, [filters]);
+const AdminJobs = () => {
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [actionType, setActionType] = useState(null);
+  const { loading, error, data = {}, filters, updateFilters, fetchData } = useAdminData(initialFilters);
+  const { moderateJob } = useAdminAuth();
 
-  const fetchJobs = async () => {
+  const handleFilterChange = useCallback((newFilters) => {
+    updateFilters(newFilters);
+  }, [updateFilters]);
+
+  const handleFilterReset = useCallback(() => {
+    updateFilters(initialFilters);
+  }, [updateFilters]);
+
+  const handlePageChange = useCallback((page) => {
+    fetchData(page);
+  }, [fetchData]);
+
+  const handleJobAction = useCallback((job, action) => {
+    setSelectedJob(job);
+    setActionType(action === 'view' ? null : action);
+  }, []);
+
+  const handleModalClose = useCallback(() => {
+    setSelectedJob(null);
+    setActionType(null);
+  }, []);
+
+  const handleActionConfirm = useCallback(async (reason) => {
     try {
-      const queryParams = new URLSearchParams(filters).toString();
-      const response = await fetch(`/api/admin/jobs?${queryParams}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch jobs');
-      
-      const data = await response.json();
-      setJobs(data);
-    } catch (error) {
-      console.error('Error:', error);
-      addError('Failed to load jobs');
-    } finally {
-      setLoading(false);
+      await moderateJob(selectedJob.id, actionType, reason);
+      toast.success(`Job successfully ${actionType}ed`);
+      fetchData(data.currentPage || 1);
+      handleModalClose();
+    } catch (err) {
+      toast.error(`Failed to ${actionType} job: ${err.message}`);
     }
-  };
+  }, [selectedJob, actionType, moderateJob, fetchData, data?.currentPage, handleModalClose]);
 
-  const handleJobAction = async (jobId, action) => {
-    try {
-      const response = await fetch(`/api/admin/jobs/${jobId}/${action}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) throw new Error(`Failed to ${action} job`);
-
-      addSuccess(`Job ${action}d successfully`);
-      fetchJobs();
-    } catch (error) {
-      console.error('Error:', error);
-      addError(`Failed to ${action} job`);
-    }
-  };
-
-  if (loading) {
-    return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 px-4 py-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-white shadow rounded-lg p-6">
+            <div className="text-center text-red-600">
+              <p>Error loading jobs: {error}</p>
+              <button
+                onClick={() => fetchData(data?.currentPage || 1)}
+                className="mt-4 btn-primary"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Manage Jobs</h1>
-        
-        <div className="flex space-x-4">
-          <select
-            value={filters.status}
-            onChange={e => setFilters(prev => ({ ...prev, status: e.target.value }))}
-            className="rounded-md border border-gray-300 px-3 py-2"
-          >
-            <option value="all">All Status</option>
-            <option value="open">Open</option>
-            <option value="in-progress">In Progress</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          
-          <select
-            value={filters.compliance}
-            onChange={e => setFilters(prev => ({ ...prev, compliance: e.target.value }))}
-            className="rounded-md border border-gray-300 px-3 py-2"
-          >
-            <option value="all">All Compliance</option>
-            <option value="flagged">Flagged</option>
-            <option value="approved">Approved</option>
-            <option value="pending">Pending Review</option>
-          </select>
-
-          <select
-            value={filters.category}
-            onChange={e => setFilters(prev => ({ ...prev, category: e.target.value }))}
-            className="rounded-md border border-gray-300 px-3 py-2"
-          >
-            <option value="all">All Categories</option>
-            <option value="development">Development</option>
-            <option value="design">Design</option>
-            <option value="marketing">Marketing</option>
-            <option value="writing">Writing</option>
-          </select>
+    <div className="min-h-screen bg-gray-50 px-4 py-6">
+      <div className="max-w-7xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-gray-900">Manage Jobs</h1>
+          <p className="mt-2 text-sm text-gray-700">
+            Review, approve, and manage job postings
+          </p>
         </div>
-      </div>
 
-      <div className="bg-white shadow overflow-hidden sm:rounded-md">
-        <ul className="divide-y divide-gray-200">
-          {jobs.map(job => (
-            <li key={job._id} className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-medium text-gray-900">{job.title}</h2>
-                  <div className="mt-1">
-                    <span className="text-sm text-gray-500">Posted by: {job.client.name}</span>
-                    <span className="mx-2">•</span>
-                    <span className="text-sm text-gray-500">Budget: ${job.budget}</span>
-                    <span className="mx-2">•</span>
-                    <span className="text-sm text-gray-500">Category: {job.category}</span>
-                  </div>
-                  <div className="mt-2">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      job.compliance === 'flagged' ? 'bg-red-100 text-red-800' :
-                      job.compliance === 'approved' ? 'bg-green-100 text-green-800' :
-                      'bg-yellow-100 text-yellow-800'
-                    }`}>
-                      {job.compliance}
-                    </span>
-                  </div>
-                </div>
+        <JobFilters
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          onReset={handleFilterReset}
+        />
 
-                <div className="flex items-center space-x-4">
-                  {job.compliance === 'pending' && (
-                    <>
-                      <button
-                        onClick={() => handleJobAction(job._id, 'approve')}
-                        className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => handleJobAction(job._id, 'flag')}
-                        className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
-                      >
-                        Flag
-                      </button>
-                    </>
-                  )}
-                  <button
-                    onClick={() => handleJobAction(job._id, 'remove')}
-                    className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
-                  >
-                    Remove
-                  </button>
-                  <button
-                    onClick={() => window.open(`/job/${job._id}`, '_blank')}
-                    className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-                  >
-                    View Details
-                  </button>
+        {loading ? (
+          <div className="mt-6 flex justify-center">
+            <LoadingSpinner size="lg" />
+          </div>
+        ) : (
+          <>
+            <div className="mt-6 space-y-4">
+              {data.jobsList?.length === 0 ? (
+                <div className="bg-white shadow rounded-lg p-6 text-center text-gray-500">
+                  No jobs found matching your filters
                 </div>
-              </div>
-              
-              <div className="mt-4">
-                <p className="text-sm text-gray-600">
-                  {job.description.length > 200 
-                    ? `${job.description.substring(0, 200)}...` 
-                    : job.description}
-                </p>
-              </div>
-
-              {job.compliance === 'flagged' && (
-                <div className="mt-4 bg-red-50 p-4 rounded">
-                  <h3 className="text-sm font-medium text-red-800">Compliance Issues:</h3>
-                  <ul className="mt-2 list-disc list-inside text-sm text-red-700">
-                    {job.complianceIssues?.map((issue, index) => (
-                      <li key={index}>{issue}</li>
-                    ))}
-                  </ul>
-                </div>
+              ) : (
+                data.jobsList?.map(job => (
+                  <JobListItem
+                    key={job.id}
+                    job={job}
+                    onActionClick={handleJobAction}
+                  />
+                ))
               )}
-            </li>
-          ))}
-        </ul>
+            </div>
+
+            {(data.totalPages > 1) && (
+              <div className="mt-6">
+                <Pagination
+                  currentPage={data.currentPage}
+                  totalPages={data.totalPages}
+                  onPageChange={handlePageChange}
+                />
+              </div>
+            )}
+          </>
+        )}
+
+        {selectedJob && actionType && (
+          <JobActionModal
+            isOpen={true}
+            onClose={handleModalClose}
+            job={selectedJob}
+            action={actionType}
+            onConfirm={handleActionConfirm}
+          />
+        )}
       </div>
     </div>
   );
-}
+};
+
+export default AdminJobs;

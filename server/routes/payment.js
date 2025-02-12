@@ -1,7 +1,9 @@
 import express from 'express';
+import { body, param, query } from 'express-validator';
 import * as paymentController from '../controllers/paymentController.js';
-import { protect, authorize, authChain, checkRateLimit } from '../middleware/auth.js';
-import { validateRequest } from '../middleware/validation/validator.js';
+import { protect, authorize } from '../middleware/auth.js';
+import { checkRateLimit } from '../middleware/rateLimit.js';
+import { validate } from '../middleware/validation/validator.js';
 import Transaction from '../models/Transaction.js';
 import logger from '../config/logger.js';
 import { errorResponse } from '../utils/errorHandler.js';
@@ -15,33 +17,15 @@ const router = express.Router();
  */
 router.post(
   '/create-intent',
-  authChain(
-    protect,
-    checkRateLimit(100, 60 * 60 * 1000) // 100 requests per hour
-  ),
-  validateRequest({
-    body: {
-      amount: {
-        type: 'number',
-        required: true,
-        min: 100 // Minimum 1 USD
-      },
-      currency: {
-        type: 'string',
-        required: false,
-        default: 'usd',
-        enum: ['usd', 'eur', 'gbp', 'aud', 'cad']
-      },
-      description: {
-        type: 'string',
-        required: false
-      },
-      metadata: {
-        type: 'object',
-        required: false
-      }
-    }
-  }),
+  protect,
+  checkRateLimit(100, 60 * 60 * 1000), // 100 requests per hour
+  [
+    body('amount').isFloat({ min: 100 }).withMessage('Amount must be at least $1.00'),
+    body('currency').optional().isIn(['usd', 'eur', 'gbp', 'aud', 'cad']).withMessage('Invalid currency'),
+    body('description').optional().isString().trim(),
+    body('metadata').optional().isObject(),
+    validate
+  ],
   paymentController.createPaymentIntent
 );
 
@@ -52,25 +36,13 @@ router.post(
  */
 router.post(
   '/confirm/:transactionId',
-  authChain(
-    protect,
-    checkRateLimit(100, 60 * 60 * 1000)
-  ),
-  validateRequest({
-    params: {
-      transactionId: {
-        type: 'string',
-        required: true,
-        pattern: /^[0-9a-fA-F]{24}$/ // MongoDB ObjectId pattern
-      }
-    },
-    body: {
-      paymentIntentId: {
-        type: 'string',
-        required: true
-      }
-    }
-  }),
+  protect,
+  checkRateLimit(100, 60 * 60 * 1000),
+  [
+    param('transactionId').isMongoId().withMessage('Invalid transaction ID'),
+    body('paymentIntentId').notEmpty().withMessage('Payment intent ID is required'),
+    validate
+  ],
   paymentController.confirmPayment
 );
 
@@ -81,32 +53,15 @@ router.post(
  */
 router.post(
   '/refund/:transactionId',
-  authChain(
-    protect,
-    authorize('admin', 'support'),
-    checkRateLimit(50, 60 * 60 * 1000) // 50 requests per hour
-  ),
-  validateRequest({
-    params: {
-      transactionId: {
-        type: 'string',
-        required: true,
-        pattern: /^[0-9a-fA-F]{24}$/
-      }
-    },
-    body: {
-      amount: {
-        type: 'number',
-        required: false,
-        min: 1
-      },
-      reason: {
-        type: 'string',
-        required: true,
-        enum: ['requested_by_customer', 'duplicate', 'fraudulent']
-      }
-    }
-  }),
+  protect,
+  authorize('admin', 'support'),
+  checkRateLimit(50, 60 * 60 * 1000), // 50 requests per hour
+  [
+    param('transactionId').isMongoId().withMessage('Invalid transaction ID'),
+    body('amount').optional().isFloat({ min: 1 }).withMessage('Amount must be at least 1'),
+    body('reason').isIn(['requested_by_customer', 'duplicate', 'fraudulent']).withMessage('Invalid reason'),
+    validate
+  ],
   paymentController.processRefund
 );
 
@@ -117,35 +72,15 @@ router.post(
  */
 router.get(
   '/transactions',
-  authChain(
-    protect,
-    checkRateLimit(200, 60 * 60 * 1000) // 200 requests per hour
-  ),
-  validateRequest({
-    query: {
-      page: {
-        type: 'number',
-        required: false,
-        min: 1,
-        default: 1
-      },
-      limit: {
-        type: 'number',
-        required: false,
-        min: 1,
-        max: 100,
-        default: 10
-      },
-      startDate: {
-        type: 'date',
-        required: false
-      },
-      endDate: {
-        type: 'date',
-        required: false
-      }
-    }
-  }),
+  protect,
+  checkRateLimit(200, 60 * 60 * 1000), // 200 requests per hour
+  [
+    query('page').optional().isInt({ min: 1 }).toInt().withMessage('Page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 100 }).toInt().withMessage('Limit must be between 1 and 100'),
+    query('startDate').optional().isISO8601().withMessage('Invalid start date'),
+    query('endDate').optional().isISO8601().withMessage('Invalid end date'),
+    validate
+  ],
   paymentController.getTransactions
 );
 
@@ -156,19 +91,12 @@ router.get(
  */
 router.get(
   '/transactions/:id',
-  authChain(
-    protect,
-    checkRateLimit(200, 60 * 60 * 1000)
-  ),
-  validateRequest({
-    params: {
-      id: {
-        type: 'string',
-        required: true,
-        pattern: /^[0-9a-fA-F]{24}$/
-      }
-    }
-  }),
+  protect,
+  checkRateLimit(200, 60 * 60 * 1000),
+  [
+    param('id').isMongoId().withMessage('Invalid transaction ID'),
+    validate
+  ],
   paymentController.getTransactionDetails
 );
 
@@ -184,61 +112,25 @@ router.post(
 );
 
 /**
- * Admin Routes
- */
-
-/**
  * @route   GET /api/payment/admin/transactions
  * @desc    Get all transactions (admin)
  * @access  Private (Admin)
  */
 router.get(
   '/admin/transactions',
-  authChain(
-    protect,
-    authorize('admin'),
-    checkRateLimit(500, 60 * 60 * 1000) // 500 requests per hour
-  ),
-  validateRequest({
-    query: {
-      page: {
-        type: 'number',
-        required: false,
-        min: 1,
-        default: 1
-      },
-      limit: {
-        type: 'number',
-        required: false,
-        min: 1,
-        max: 100,
-        default: 50
-      },
-      startDate: {
-        type: 'date',
-        required: false
-      },
-      endDate: {
-        type: 'date',
-        required: false
-      },
-      status: {
-        type: 'string',
-        required: false,
-        enum: ['pending', 'completed', 'failed', 'refunded']
-      },
-      type: {
-        type: 'string',
-        required: false,
-        enum: ['payment', 'refund']
-      },
-      userId: {
-        type: 'string',
-        required: false,
-        pattern: /^[0-9a-fA-F]{24}$/
-      }
-    }
-  }),
+  protect,
+  authorize('admin'),
+  checkRateLimit(500, 60 * 60 * 1000), // 500 requests per hour
+  [
+    query('page').optional().isInt({ min: 1 }).toInt().withMessage('Page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 100 }).toInt().withMessage('Limit must be between 1 and 100'),
+    query('startDate').optional().isISO8601().withMessage('Invalid start date'),
+    query('endDate').optional().isISO8601().withMessage('Invalid end date'),
+    query('status').optional().isIn(['pending', 'completed', 'failed', 'refunded']).withMessage('Invalid status'),
+    query('type').optional().isIn(['payment', 'refund']).withMessage('Invalid type'),
+    query('userId').optional().isMongoId().withMessage('Invalid user ID'),
+    validate
+  ],
   async (req, res) => {
     try {
       const {

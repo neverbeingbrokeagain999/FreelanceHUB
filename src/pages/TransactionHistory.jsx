@@ -25,7 +25,7 @@ function TransactionHistory() {
       }).toString();
 
       const response = await fetch(
-        `http://localhost:5000/api/payments/transactions?${queryParams}`,
+        `/api/payments/transactions?${queryParams}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,

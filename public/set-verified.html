@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Set User as Verified</title>
+</head>
+<body>
+    <h2>Setting user as verified...</h2>
+    <script>
+        try {
+            const auth = JSON.parse(localStorage.getItem('auth') || '{}');
+            console.log('Before:', auth);
+            
+            if (auth.user) {
+                auth.user.isVerified = true;
+                localStorage.setItem('auth', JSON.stringify(auth));
+                document.write('<p>Successfully set user as verified.</p>');
+                document.write('<p>Updated auth:</p>');
+                document.write('<pre>' + JSON.stringify(auth, null, 2) + '</pre>');
+                document.write('<p>You can now close this page and reload the main application.</p>');
+            } else {
+                document.write('<p>No authenticated user found in localStorage</p>');
+            }
+        } catch (error) {
+            document.write('<p>Error: ' + error.message + '</p>');
+        }
+    </script>
+</body>
+</html>

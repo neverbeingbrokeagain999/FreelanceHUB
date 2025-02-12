@@ -12,7 +12,7 @@ import React, { useState, useEffect } from 'react';
         const fetchTransactions = async () => {
           try {
             const token = localStorage.getItem('token');
-            const response = await fetch('http://localhost:5000/api/transactions/freelancer', {
+            const response = await fetch('/api/transactions/freelancer', {
               headers: {
                 'Authorization': `Bearer ${token}`,
               },
@@ -31,7 +31,7 @@ import React, { useState, useEffect } from 'react';
         const fetchWithdrawalHistory = async () => {
           try {
             const token = localStorage.getItem('token');
-            const response = await fetch('http://localhost:5000/api/transactions/withdrawal-history', {
+            const response = await fetch('/api/transactions/withdrawal-history', {
               headers: {
                 'Authorization': `Bearer ${token}`,
               },
@@ -57,7 +57,7 @@ import React, { useState, useEffect } from 'react';
       const handleWithdrawalRequest = async () => {
         try {
           const token = localStorage.getItem('token');
-          const response = await fetch('http://localhost:5000/api/transactions/withdrawal', {
+          const response = await fetch('/api/transactions/withdrawal', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -75,7 +75,7 @@ import React, { useState, useEffect } from 'react';
             const fetchTransactions = async () => {
               try {
                 const token = localStorage.getItem('token');
-                const response = await fetch('http://localhost:5000/api/transactions/freelancer', {
+                const response = await fetch('/api/transactions/freelancer', {
                   headers: {
                     'Authorization': `Bearer ${token}`,
                   },

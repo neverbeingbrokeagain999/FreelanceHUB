@@ -154,10 +154,20 @@ const jobSchema = new mongoose.Schema({
       'completed',
       'cancelled',
       'expired',
-      'on_hold'
+      'on_hold',
+      'removed'
     ],
     default: 'draft'
   },
+  compliance: {
+    type: String,
+    enum: ['pending', 'approved', 'flagged'],
+    default: 'pending'
+  },
+  complianceIssues: [{
+    type: String,
+    trim: true
+  }],
   visibility: {
     type: String,
     enum: ['public', 'private', 'invite_only'],

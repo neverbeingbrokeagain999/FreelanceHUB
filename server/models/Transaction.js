@@ -54,6 +54,10 @@ const transactionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Dispute'
   },
+  escrow: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Escrow'
+  },
 
   // Transaction Details
   type: {
@@ -65,7 +69,10 @@ const transactionSchema = new mongoose.Schema({
       'deposit',
       'fee',
       'bonus',
-      'adjustment'
+      'adjustment',
+      'escrow_fund',
+      'escrow_release',
+      'escrow_refund'
     ],
     required: true
   },
@@ -82,7 +89,11 @@ const transactionSchema = new mongoose.Schema({
       'referral_bonus',
       'withdrawal_fee',
       'currency_conversion',
-      'tax_deduction'
+      'tax_deduction',
+      'escrow_deposit',
+      'escrow_disbursement',
+      'escrow_fee',
+      'escrow_refund_fee'
     ]
   },
   description: {

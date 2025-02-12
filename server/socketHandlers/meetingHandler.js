@@ -1,194 +1,228 @@
-import Meeting from '../models/Meeting.js';
+const Meeting = require('../models/Meeting');
+const { WEBRTC_EVENTS } = require('../config/webrtc');
+const logger = require('../config/logger');
 
-export default function setupMeetingHandlers(io) {
-  // Meeting namespace
-  const meetingNamespace = io.of('/meetings');
+class MeetingHandler {
+  constructor(io, socket) {
+    this.io = io;
+    this.socket = socket;
+    this.user = socket.user;
 
-  meetingNamespace.on('connection', (socket) => {
-    let currentMeetingId = null;
-    let currentUserId = null;
+    // Bind methods
+    this.handleJoinMeeting = this.handleJoinMeeting.bind(this);
+    this.handleLeaveMeeting = this.handleLeaveMeeting.bind(this);
+    this.handleSignalingMessage = this.handleSignalingMessage.bind(this);
+    this.handleMediaStateChange = this.handleMediaStateChange.bind(this);
+    this.handleNetworkStats = this.handleNetworkStats.bind(this);
+    this.handleError = this.handleError.bind(this);
 
-    socket.on('joinMeeting', async ({ meetingId, userId }) => {
-      try {
-        const meeting = await Meeting.findOne({ meetingId });
-        if (!meeting) {
-          socket.emit('error', { message: 'Meeting not found' });
-          return;
-        }
+    // Register event handlers
+    this.registerHandlers();
+  }
 
-        // Join the meeting room
-        socket.join(`meeting_${meetingId}`);
-        currentMeetingId = meetingId;
-        currentUserId = userId;
+  registerHandlers() {
+    this.socket.on('meeting:join', this.handleJoinMeeting);
+    this.socket.on('meeting:leave', this.handleLeaveMeeting);
+    this.socket.on('meeting:signal', this.handleSignalingMessage);
+    this.socket.on('meeting:media', this.handleMediaStateChange);
+    this.socket.on('meeting:networkStats', this.handleNetworkStats);
+    this.socket.on('meeting:error', this.handleError);
+  }
 
-        // Get participant info
-        const participant = meeting.participants.find(
-          p => p.user.toString() === userId && !p.leftAt
-        );
-
-        if (!participant) {
-          socket.emit('error', { message: 'Not a participant of this meeting' });
-          return;
-        }
-
-        // Notify others in the meeting
-        socket.to(`meeting_${meetingId}`).emit('userJoined', {
-          userId,
-          role: meeting.host.toString() === userId ? 'host' : 'participant'
-        });
-
-        // Send current participants list to the joining user
-        const activeParticipants = meeting.participants
-          .filter(p => !p.leftAt)
-          .map(p => ({
-            userId: p.user.toString(),
-            role: meeting.host.toString() === p.user.toString() ? 'host' : 'participant'
-          }));
-
-        socket.emit('meetingJoined', {
-          participants: activeParticipants,
-          isHost: meeting.host.toString() === userId
-        });
-      } catch (error) {
-        console.error('Join meeting socket error:', error);
-        socket.emit('error', { message: 'Failed to join meeting' });
+  async handleJoinMeeting(data) {
+    try {
+      const { meetingId } = data;
+      
+      const meeting = await Meeting.findById(meetingId);
+      if (!meeting) {
+        throw new Error('Meeting not found');
       }
-    });
 
-    // WebRTC Signaling
-    socket.on('offer', ({ targetUserId, description }) => {
-      if (!currentMeetingId) return;
-      socket.to(`meeting_${currentMeetingId}`)
-        .to(targetUserId)
-        .emit('offer', {
-          fromUserId: currentUserId,
-          description
-        });
-    });
+      // Join the meeting's socket room
+      this.socket.join(`meeting:${meetingId}`);
 
-    socket.on('answer', ({ targetUserId, description }) => {
-      if (!currentMeetingId) return;
-      socket.to(`meeting_${currentMeetingId}`)
-        .to(targetUserId)
-        .emit('answer', {
-          fromUserId: currentUserId,
-          description
-        });
-    });
+      // Get existing participants for WebRTC connections
+      const activeParticipants = meeting.participants
+        .filter(p => !p.leftAt)
+        .map(p => ({
+          userId: p.user.toString(),
+          role: p.role,
+          media: p.media
+        }));
 
-    socket.on('iceCandidate', ({ targetUserId, candidate }) => {
-      if (!currentMeetingId) return;
-      socket.to(`meeting_${currentMeetingId}`)
-        .to(targetUserId)
-        .emit('iceCandidate', {
-          fromUserId: currentUserId,
-          candidate
-        });
-    });
-
-    // Meeting Controls
-    socket.on('toggleAudio', ({ enabled }) => {
-      if (!currentMeetingId) return;
-      socket.to(`meeting_${currentMeetingId}`).emit('userAudioUpdate', {
-        userId: currentUserId,
-        enabled
+      // Notify existing participants about the new peer
+      this.socket.to(`meeting:${meetingId}`).emit(WEBRTC_EVENTS.PEER_CONNECT, {
+        peerId: this.socket.id,
+        userId: this.user._id,
+        role: data.role || 'participant',
+        media: data.media || { video: true, audio: true }
       });
-    });
 
-    socket.on('toggleVideo', ({ enabled }) => {
-      if (!currentMeetingId) return;
-      socket.to(`meeting_${currentMeetingId}`).emit('userVideoUpdate', {
-        userId: currentUserId,
-        enabled
+      // Send existing peers info to the new participant
+      this.socket.emit('meeting:peers', {
+        peers: activeParticipants,
+        config: meeting.settings
       });
-    });
 
-    socket.on('startScreenShare', () => {
-      if (!currentMeetingId) return;
-      socket.to(`meeting_${currentMeetingId}`).emit('userStartedScreenShare', {
-        userId: currentUserId
+      logger.info({
+        message: 'User joined meeting',
+        userId: this.user._id,
+        meetingId,
+        socketId: this.socket.id
       });
-    });
-
-    socket.on('stopScreenShare', () => {
-      if (!currentMeetingId) return;
-      socket.to(`meeting_${currentMeetingId}`).emit('userStoppedScreenShare', {
-        userId: currentUserId
+    } catch (error) {
+      logger.error({
+        message: 'Error joining meeting',
+        error: error.message,
+        userId: this.user._id,
+        socketId: this.socket.id
       });
-    });
+      this.socket.emit('meeting:error', { message: error.message });
+    }
+  }
 
-    // Chat Messages
-    socket.on('sendMessage', async ({ content, type = 'text', file = null }) => {
-      if (!currentMeetingId) return;
-      try {
-        const meeting = await Meeting.findOne({ meetingId: currentMeetingId });
-        if (!meeting) return;
+  async handleLeaveMeeting(data) {
+    try {
+      const { meetingId } = data;
+      
+      // Leave the socket room
+      this.socket.leave(`meeting:${meetingId}`);
 
-        const message = {
-          sender: currentUserId,
-          content,
-          type,
-          timestamp: new Date(),
-          file
-        };
-
-        meeting.chat.push(message);
-        await meeting.save();
-
-        socket.to(`meeting_${currentMeetingId}`).emit('newMessage', message);
-      } catch (error) {
-        console.error('Send message error:', error);
-        socket.emit('error', { message: 'Failed to send message' });
-      }
-    });
-
-    // Connection Status
-    socket.on('updateConnectionQuality', ({ quality }) => {
-      if (!currentMeetingId) return;
-      socket.to(`meeting_${currentMeetingId}`).emit('userConnectionUpdate', {
-        userId: currentUserId,
-        quality
+      // Notify other participants
+      this.socket.to(`meeting:${meetingId}`).emit(WEBRTC_EVENTS.PEER_DISCONNECT, {
+        peerId: this.socket.id,
+        userId: this.user._id
       });
+
+      logger.info({
+        message: 'User left meeting',
+        userId: this.user._id,
+        meetingId,
+        socketId: this.socket.id
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error leaving meeting',
+        error: error.message,
+        userId: this.user._id,
+        socketId: this.socket.id
+      });
+    }
+  }
+
+  handleSignalingMessage(data) {
+    const { targetId, meetingId, type, payload } = data;
+
+    // Forward WebRTC signaling messages to the target peer
+    this.io.to(targetId).emit('meeting:signal', {
+      peerId: this.socket.id,
+      userId: this.user._id,
+      type,
+      payload
     });
+  }
 
-    // Handle disconnection
-    socket.on('disconnect', async () => {
-      if (currentMeetingId && currentUserId) {
-        try {
-          const meeting = await Meeting.findOne({ meetingId: currentMeetingId });
-          if (meeting) {
-            // Update participant's left time
-            const participant = meeting.participants.find(
-              p => p.user.toString() === currentUserId && !p.leftAt
-            );
-            if (participant) {
-              participant.leftAt = new Date();
-              await meeting.save();
-            }
+  async handleMediaStateChange(data) {
+    try {
+      const { meetingId, media } = data;
+      
+      // Update participant's media state in the database
+      await Meeting.updateOne(
+        {
+          _id: meetingId,
+          'participants.user': this.user._id
+        },
+        {
+          $set: {
+            'participants.$.media': media
+          }
+        }
+      );
 
-            // Notify others
-            socket.to(`meeting_${currentMeetingId}`).emit('userLeft', {
-              userId: currentUserId
-            });
+      // Notify other participants
+      this.socket.to(`meeting:${meetingId}`).emit('meeting:mediaUpdate', {
+        userId: this.user._id,
+        media
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error updating media state',
+        error: error.message,
+        userId: this.user._id
+      });
+    }
+  }
 
-            // If no participants left and meeting is active, end it
-            const activeParticipants = meeting.participants.filter(p => !p.leftAt);
-            if (activeParticipants.length === 0 && meeting.status === 'active') {
-              meeting.status = 'completed';
-              meeting.endTime = new Date();
-              await meeting.save();
-              
-              socket.to(`meeting_${currentMeetingId}`).emit('meetingEnded', {
-                meetingId: currentMeetingId
-              });
+  async handleNetworkStats(data) {
+    try {
+      const { meetingId, stats } = data;
+      
+      // Update network statistics in the database
+      await Meeting.updateOne(
+        {
+          _id: meetingId,
+          'participants.user': this.user._id
+        },
+        {
+          $set: {
+            'participants.$.networkStats': {
+              ...stats,
+              timestamp: new Date()
             }
           }
-        } catch (error) {
-          console.error('Disconnect handler error:', error);
         }
-      }
-    });
-  });
+      );
 
-  return meetingNamespace;
+      // Emit to hosts for monitoring
+      this.socket.to(`meeting:${meetingId}:hosts`).emit('meeting:networkStats', {
+        userId: this.user._id,
+        stats
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error updating network stats',
+        error: error.message,
+        userId: this.user._id
+      });
+    }
+  }
+
+  handleError(data) {
+    logger.error({
+      message: 'Meeting WebRTC error',
+      error: data.error,
+      userId: this.user._id,
+      meetingId: data.meetingId,
+      socketId: this.socket.id
+    });
+  }
+
+  // Clean up on socket disconnect
+  async handleDisconnect() {
+    try {
+      // Find active meetings for this user
+      const activeMeetings = await Meeting.find({
+        'participants': {
+          $elemMatch: {
+            user: this.user._id,
+            leftAt: null
+          }
+        }
+      });
+
+      // Update participant status and notify others for each meeting
+      for (const meeting of activeMeetings) {
+        await this.handleLeaveMeeting({ meetingId: meeting._id });
+      }
+    } catch (error) {
+      logger.error({
+        message: 'Error handling socket disconnect',
+        error: error.message,
+        userId: this.user._id,
+        socketId: this.socket.id
+      });
+    }
+  }
 }
+
+module.exports = MeetingHandler;

@@ -26,7 +26,7 @@ const swaggerOptions = {
       {
         url: process.env.NODE_ENV === 'production' 
           ? 'https://api.freelancehub.com/v2'
-          : 'http://localhost:5000/api/v2',
+          : '/api/v2',
         description: 'API v2 (Future)',
       },
     ],

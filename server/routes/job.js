@@ -1,20 +1,24 @@
 import express from 'express';
+import { body, param, query } from 'express-validator';
 import { protect as auth, authorize } from '../middleware/auth.js';
+import { validate } from '../middleware/validation/validator.js';
 import mongoose from 'mongoose';
 import Job from '../models/Job.js';
 import logger from '../config/logger.js';
 import { errorResponse } from '../utils/errorHandler.js';
 import {
   createJob,
-  getAllJobs,
-  getJobById,
+  getJobs,
+  getJob,
   updateJob,
   deleteJob,
-  applyToJob,
+  applyToJob as submitProposal,
   getApplicants,
   searchJobs,
   getRecommendedJobs,
-  getJobStats
+  getJobStats,
+  getFreelancerJobs,
+  getClientJobs
 } from '../controllers/jobController.js';
 
 const router = express.Router();
@@ -23,100 +27,160 @@ const router = express.Router();
 const clientOnly = authorize('client');
 
 // Search and recommended routes must be before parameterized routes
-router.get('/search', auth, searchJobs);
-router.get('/recommended', auth, getRecommendedJobs);
-router.get('/stats', auth, getJobStats);
+router.get('/search',
+  auth,
+  [
+    query('q').optional().trim().isString(),
+    query('skills').optional().isArray(),
+    query('skills.*').optional().trim().isString(),
+    query('type').optional().isIn(['fixed', 'hourly']),
+    query('budget.min').optional().isFloat({ min: 0 }),
+    query('budget.max').optional().isFloat({ min: 0 }),
+    query('experience').optional().isIn(['entry', 'intermediate', 'expert']),
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 50 }),
+    query('sort').optional().isIn(['latest', 'budget', 'deadline']),
+    validate
+  ],
+  searchJobs
+);
+
+router.get('/recommended',
+  auth,
+  [
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 50 }),
+    validate
+  ],
+  getRecommendedJobs
+);
+
+router.get('/stats',
+  auth,
+  [
+    query('timeframe').optional().isIn(['day', 'week', 'month', 'year']),
+    validate
+  ],
+  getJobStats
+);
+
 // Freelancer routes
-router.get('/freelancer', auth, authorize('freelancer'), async (req, res) => {
-  try {
-    if (!req.user || !req.user._id) {
-      logger.error('No user ID found in request');
-      return errorResponse(res, 401, 'Authentication required');
-    }
+router.get('/freelancer',
+  auth,
+  authorize('freelancer'),
+  [
+    query('status').optional().isIn(['applied', 'hired', 'completed']),
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 50 }),
+    validate
+  ],
+  getFreelancerJobs
+);
 
-    logger.info('Getting jobs for freelancer:', req.user._id);
-    
-    let freelancerId;
-    try {
-      freelancerId = new mongoose.Types.ObjectId(req.user._id);
-      logger.debug('Converted freelancer ID:', freelancerId);
-    } catch (err) {
-      logger.error('Invalid user ID format:', err);
-      return errorResponse(res, 400, 'Invalid user ID format');
-    }
+router.get('/client',
+  auth,
+  clientOnly,
+  [
+    query('status').optional().isIn(['draft', 'open', 'in-progress', 'completed']),
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 50 }),
+    validate
+  ],
+  getClientJobs
+);
 
-    const jobs = await Job.find({
-      $or: [
-        { status: 'open' },
-        { applicants: freelancerId }
-      ]
-    })
-    .sort({ createdAt: -1 })
-    .populate('client', 'name email')
-    .lean();
-    
-    logger.info(`Found ${jobs.length} jobs for freelancer:`, req.user.userId);
-    
-    res.json({ jobs });
-  } catch (error) {
-    logger.error('Error fetching freelancer jobs:', error);
-    if (error.name === 'CastError') {
-      return errorResponse(res, 400, 'Invalid ID format');
-    }
-    return errorResponse(res, 500, 'Error fetching freelancer jobs');
-  }
-});
+// Common route for all authenticated users to view jobs
+router.get('/',
+  auth,
+  [
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 50 }),
+    query('status').optional().isIn(['all', 'open', 'in-progress', 'completed']),
+    query('type').optional().isIn(['fixed', 'hourly']),
+    query('sort').optional().isIn(['latest', 'budget', 'deadline']),
+    validate
+  ],
+  getJobs
+);
 
-router.get('/client', auth, clientOnly, async (req, res) => {
-  try {
-    if (!req.user || !req.user._id) {
-      logger.error('No user ID found in request');
-      return errorResponse(res, 401, 'Authentication required');
-    }
+router.get('/:id',
+  auth,
+  [
+    param('id').isMongoId().withMessage('Invalid job ID'),
+    validate
+  ],
+  getJob
+);
 
-    logger.info('Getting jobs for client:', req.user._id);
-    
-    let clientId;
-    try {
-      clientId = new mongoose.Types.ObjectId(req.user._id);
-      logger.debug('Converted client ID:', clientId);
-    } catch (err) {
-      logger.error('Invalid user ID format:', err);
-      return errorResponse(res, 400, 'Invalid user ID format');
-    }
+// Client-only routes
+router.post('/',
+  [auth, clientOnly],
+  [
+    body('title').trim().isLength({ min: 5, max: 100 }).withMessage('Title must be between 5 and 100 characters'),
+    body('description').trim().isLength({ min: 20, max: 5000 }).withMessage('Description must be between 20 and 5000 characters'),
+    body('type').isIn(['fixed', 'hourly']).withMessage('Invalid job type'),
+    body('budget').isFloat({ min: 0 }).withMessage('Budget must be greater than 0'),
+    body('skills').isArray().withMessage('Skills must be an array'),
+    body('skills.*').trim().isString().withMessage('Each skill must be a string'),
+    body('experience').isIn(['entry', 'intermediate', 'expert']).withMessage('Invalid experience level'),
+    body('duration').optional().isIn(['less_than_1_month', '1_to_3_months', '3_to_6_months', 'more_than_6_months']),
+    body('deadline').optional().isISO8601().withMessage('Invalid deadline date'),
+    validate
+  ],
+  createJob
+);
 
-    // First check if any jobs exist at all
-    const allJobs = await Job.find({});
-    logger.debug('Total jobs in database:', allJobs.length);
+router.put('/:id',
+  [auth, clientOnly],
+  [
+    param('id').isMongoId().withMessage('Invalid job ID'),
+    body('title').optional().trim().isLength({ min: 5, max: 100 }).withMessage('Title must be between 5 and 100 characters'),
+    body('description').optional().trim().isLength({ min: 20, max: 5000 }).withMessage('Description must be between 20 and 5000 characters'),
+    body('type').optional().isIn(['fixed', 'hourly']).withMessage('Invalid job type'),
+    body('budget').optional().isFloat({ min: 0 }).withMessage('Budget must be greater than 0'),
+    body('skills').optional().isArray().withMessage('Skills must be an array'),
+    body('skills.*').optional().trim().isString().withMessage('Each skill must be a string'),
+    body('experience').optional().isIn(['entry', 'intermediate', 'expert']).withMessage('Invalid experience level'),
+    body('duration').optional().isIn(['less_than_1_month', '1_to_3_months', '3_to_6_months', 'more_than_6_months']),
+    body('deadline').optional().isISO8601().withMessage('Invalid deadline date'),
+    body('status').optional().isIn(['draft', 'open', 'in-progress', 'completed', 'cancelled']).withMessage('Invalid status'),
+    validate
+  ],
+  updateJob
+);
 
-    // Then try to find client's jobs
-    const clientJobs = await Job.find({ client: clientId })
-      .sort({ createdAt: -1 })
-      .populate('client', 'name email')  // Populate client details
-      .lean();  // Convert to plain JavaScript object
-    
-    logger.info(`Found ${clientJobs.length} jobs for client:`, req.user.userId);
-    
-    res.json({ jobs: clientJobs });
-  } catch (error) {
-    logger.error('Error fetching client jobs:', error);
-    if (error.name === 'CastError') {
-      return errorResponse(res, 400, 'Invalid ID format');
-    }
-    return errorResponse(res, 500, 'Error fetching client jobs');
-  }
-});
+router.delete('/:id',
+  [auth, clientOnly],
+  [
+    param('id').isMongoId().withMessage('Invalid job ID'),
+    validate
+  ],
+  deleteJob
+);
 
-// Basic CRUD routes
-router.post('/', auth, createJob);
-router.get('/', auth, getAllJobs);
-router.get('/:id', auth, getJobById);
-router.put('/:id', auth, updateJob);
-router.delete('/:id', auth, deleteJob);
+router.get('/:id/applicants',
+  [auth, clientOnly],
+  [
+    param('id').isMongoId().withMessage('Invalid job ID'),
+    query('page').optional().isInt({ min: 1 }),
+    query('limit').optional().isInt({ min: 1, max: 50 }),
+    query('status').optional().isIn(['pending', 'accepted', 'rejected']),
+    validate
+  ],
+  getApplicants
+);
 
-// Application routes after CRUD routes
-router.post('/:id/apply', auth, applyToJob);
-router.get('/:id/applicants', auth, getApplicants);
+// Freelancer-only routes
+router.post('/:id/apply',
+  [auth, authorize('freelancer')],
+  [
+    param('id').isMongoId().withMessage('Invalid job ID'),
+    body('coverLetter').trim().isLength({ min: 50, max: 1000 }).withMessage('Cover letter must be between 50 and 1000 characters'),
+    body('proposedRate').optional().isFloat({ min: 0 }).withMessage('Proposed rate must be greater than 0'),
+    body('estimatedTime').optional().isInt({ min: 1 }).withMessage('Estimated time must be greater than 0'),
+    validate
+  ],
+  submitProposal
+);
 
-// Export the router
 export default router;
